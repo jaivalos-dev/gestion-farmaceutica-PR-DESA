@@ -1,0 +1,157 @@
+-- 02_constraints.sql
+-- PK, FK, UNIQUE y CHECK de la baseline fisica.
+
+-- Primary Keys
+ALTER TABLE ROL ADD CONSTRAINT pk_rol PRIMARY KEY (id_rol);
+ALTER TABLE SUCURSAL ADD CONSTRAINT pk_sucursal PRIMARY KEY (id_sucursal);
+ALTER TABLE USUARIO ADD CONSTRAINT pk_usuario PRIMARY KEY (id_usuario);
+ALTER TABLE MEDICAMENTO ADD CONSTRAINT pk_medicamento PRIMARY KEY (id_medicamento);
+ALTER TABLE INVENTARIO ADD CONSTRAINT pk_inventario PRIMARY KEY (id_inventario);
+ALTER TABLE MOVIMIENTO_INVENTARIO ADD CONSTRAINT pk_mov_inv PRIMARY KEY (id_movimiento);
+ALTER TABLE TRANSFERENCIA ADD CONSTRAINT pk_transferencia PRIMARY KEY (id_transferencia);
+ALTER TABLE DETALLE_TRANSFERENCIA ADD CONSTRAINT pk_det_trans PRIMARY KEY (id_detalle);
+ALTER TABLE VENTA ADD CONSTRAINT pk_venta PRIMARY KEY (id_venta);
+ALTER TABLE DETALLE_VENTA ADD CONSTRAINT pk_det_venta PRIMARY KEY (id_detalle);
+ALTER TABLE MOVIMIENTO_CAJA ADD CONSTRAINT pk_mov_caja PRIMARY KEY (id_mov_caja);
+ALTER TABLE ACTIVO_FIJO ADD CONSTRAINT pk_activo PRIMARY KEY (id_activo);
+ALTER TABLE GASTO_PLANILLA ADD CONSTRAINT pk_gasto_plan PRIMARY KEY (id_gasto);
+ALTER TABLE ENTREGA ADD CONSTRAINT pk_entrega PRIMARY KEY (id_entrega);
+ALTER TABLE AUDITORIA ADD CONSTRAINT pk_auditoria PRIMARY KEY (id_auditoria);
+
+-- Alternate / Unique Keys
+ALTER TABLE ROL ADD CONSTRAINT uq_rol_nombre UNIQUE (nombre);
+ALTER TABLE USUARIO ADD CONSTRAINT uq_usuario_correo UNIQUE (correo);
+ALTER TABLE MEDICAMENTO ADD CONSTRAINT uq_med_codigo UNIQUE (codigo);
+ALTER TABLE INVENTARIO ADD CONSTRAINT uq_inv_suc_med UNIQUE (id_sucursal, id_medicamento);
+ALTER TABLE ENTREGA ADD CONSTRAINT uq_entrega_venta UNIQUE (id_venta);
+
+-- Foreign Keys
+ALTER TABLE USUARIO ADD CONSTRAINT fk_usuario_rol
+    FOREIGN KEY (id_rol) REFERENCES ROL (id_rol);
+ALTER TABLE USUARIO ADD CONSTRAINT fk_usuario_sucursal
+    FOREIGN KEY (id_sucursal) REFERENCES SUCURSAL (id_sucursal);
+
+ALTER TABLE INVENTARIO ADD CONSTRAINT fk_inv_sucursal
+    FOREIGN KEY (id_sucursal) REFERENCES SUCURSAL (id_sucursal);
+ALTER TABLE INVENTARIO ADD CONSTRAINT fk_inv_medicamento
+    FOREIGN KEY (id_medicamento) REFERENCES MEDICAMENTO (id_medicamento);
+
+ALTER TABLE MOVIMIENTO_INVENTARIO ADD CONSTRAINT fk_mov_inv_inventario
+    FOREIGN KEY (id_inventario) REFERENCES INVENTARIO (id_inventario);
+ALTER TABLE MOVIMIENTO_INVENTARIO ADD CONSTRAINT fk_mov_inv_usuario
+    FOREIGN KEY (id_usuario) REFERENCES USUARIO (id_usuario);
+
+ALTER TABLE TRANSFERENCIA ADD CONSTRAINT fk_trans_origen
+    FOREIGN KEY (id_sucursal_origen) REFERENCES SUCURSAL (id_sucursal);
+ALTER TABLE TRANSFERENCIA ADD CONSTRAINT fk_trans_destino
+    FOREIGN KEY (id_sucursal_destino) REFERENCES SUCURSAL (id_sucursal);
+ALTER TABLE TRANSFERENCIA ADD CONSTRAINT fk_trans_usuario
+    FOREIGN KEY (id_usuario) REFERENCES USUARIO (id_usuario);
+
+ALTER TABLE DETALLE_TRANSFERENCIA ADD CONSTRAINT fk_det_trans_trans
+    FOREIGN KEY (id_transferencia) REFERENCES TRANSFERENCIA (id_transferencia);
+ALTER TABLE DETALLE_TRANSFERENCIA ADD CONSTRAINT fk_det_trans_med
+    FOREIGN KEY (id_medicamento) REFERENCES MEDICAMENTO (id_medicamento);
+
+ALTER TABLE VENTA ADD CONSTRAINT fk_venta_sucursal
+    FOREIGN KEY (id_sucursal) REFERENCES SUCURSAL (id_sucursal);
+ALTER TABLE VENTA ADD CONSTRAINT fk_venta_usuario
+    FOREIGN KEY (id_usuario) REFERENCES USUARIO (id_usuario);
+
+ALTER TABLE DETALLE_VENTA ADD CONSTRAINT fk_det_venta_venta
+    FOREIGN KEY (id_venta) REFERENCES VENTA (id_venta);
+ALTER TABLE DETALLE_VENTA ADD CONSTRAINT fk_det_venta_med
+    FOREIGN KEY (id_medicamento) REFERENCES MEDICAMENTO (id_medicamento);
+
+ALTER TABLE MOVIMIENTO_CAJA ADD CONSTRAINT fk_caja_sucursal
+    FOREIGN KEY (id_sucursal) REFERENCES SUCURSAL (id_sucursal);
+ALTER TABLE MOVIMIENTO_CAJA ADD CONSTRAINT fk_caja_usuario
+    FOREIGN KEY (id_usuario) REFERENCES USUARIO (id_usuario);
+ALTER TABLE MOVIMIENTO_CAJA ADD CONSTRAINT fk_caja_venta
+    FOREIGN KEY (id_venta) REFERENCES VENTA (id_venta);
+
+ALTER TABLE ACTIVO_FIJO ADD CONSTRAINT fk_activo_sucursal
+    FOREIGN KEY (id_sucursal) REFERENCES SUCURSAL (id_sucursal);
+
+ALTER TABLE GASTO_PLANILLA ADD CONSTRAINT fk_plan_sucursal
+    FOREIGN KEY (id_sucursal) REFERENCES SUCURSAL (id_sucursal);
+ALTER TABLE GASTO_PLANILLA ADD CONSTRAINT fk_plan_usuario
+    FOREIGN KEY (id_usuario) REFERENCES USUARIO (id_usuario);
+
+ALTER TABLE ENTREGA ADD CONSTRAINT fk_entrega_venta
+    FOREIGN KEY (id_venta) REFERENCES VENTA (id_venta);
+ALTER TABLE ENTREGA ADD CONSTRAINT fk_entrega_sucursal
+    FOREIGN KEY (id_sucursal) REFERENCES SUCURSAL (id_sucursal);
+
+ALTER TABLE AUDITORIA ADD CONSTRAINT fk_aud_usuario
+    FOREIGN KEY (id_usuario) REFERENCES USUARIO (id_usuario);
+ALTER TABLE AUDITORIA ADD CONSTRAINT fk_aud_sucursal
+    FOREIGN KEY (id_sucursal) REFERENCES SUCURSAL (id_sucursal);
+
+-- Check constraints
+ALTER TABLE ROL ADD CONSTRAINT ck_rol_activo
+    CHECK (activo IN ('S','N'));
+
+ALTER TABLE SUCURSAL ADD CONSTRAINT ck_suc_activa
+    CHECK (activa IN ('S','N'));
+ALTER TABLE SUCURSAL ADD CONSTRAINT ck_suc_tipo
+    CHECK (tipo_sucursal IN ('FARMACIA','STAND'));
+
+ALTER TABLE USUARIO ADD CONSTRAINT ck_usuario_activo
+    CHECK (activo IN ('S','N'));
+
+ALTER TABLE MEDICAMENTO ADD CONSTRAINT ck_med_activo
+    CHECK (activo IN ('S','N'));
+ALTER TABLE MEDICAMENTO ADD CONSTRAINT ck_med_precio
+    CHECK (precio >= 0);
+
+ALTER TABLE INVENTARIO ADD CONSTRAINT ck_inv_existencia
+    CHECK (existencia >= 0);
+
+ALTER TABLE MOVIMIENTO_INVENTARIO ADD CONSTRAINT ck_mov_inv_cantidad
+    CHECK (cantidad > 0);
+ALTER TABLE MOVIMIENTO_INVENTARIO ADD CONSTRAINT ck_mov_inv_saldos
+    CHECK (saldo_anterior >= 0 AND saldo_nuevo >= 0);
+ALTER TABLE MOVIMIENTO_INVENTARIO ADD CONSTRAINT ck_mov_inv_tipo
+    CHECK (tipo_movimiento IN (
+        'ENTRADA','SALIDA','AJUSTE','VENTA',
+        'TRANSFERENCIA_DESPACHO','TRANSFERENCIA_RECEPCION','REVERSO'
+    ));
+
+ALTER TABLE TRANSFERENCIA ADD CONSTRAINT ck_trans_sucursales
+    CHECK (id_sucursal_origen <> id_sucursal_destino);
+ALTER TABLE TRANSFERENCIA ADD CONSTRAINT ck_trans_estado
+    CHECK (estado IN ('SOLICITADA','PREPARADA','DESPACHADA','RECIBIDA','CANCELADA'));
+
+ALTER TABLE DETALLE_TRANSFERENCIA ADD CONSTRAINT ck_det_trans_cant
+    CHECK (cantidad > 0);
+
+ALTER TABLE VENTA ADD CONSTRAINT ck_venta_total
+    CHECK (total >= 0);
+ALTER TABLE VENTA ADD CONSTRAINT ck_venta_forma_pago
+    CHECK (forma_pago IN ('EFECTIVO','TARJETA','TRANSFERENCIA','OTRO'));
+ALTER TABLE VENTA ADD CONSTRAINT ck_venta_estado
+    CHECK (estado IN ('CREADA','CONFIRMADA','ANULADA'));
+
+ALTER TABLE DETALLE_VENTA ADD CONSTRAINT ck_det_venta_cant
+    CHECK (cantidad > 0);
+ALTER TABLE DETALLE_VENTA ADD CONSTRAINT ck_det_venta_precio
+    CHECK (precio_unitario >= 0 AND subtotal >= 0);
+
+ALTER TABLE MOVIMIENTO_CAJA ADD CONSTRAINT ck_caja_tipo
+    CHECK (tipo IN ('INGRESO','EGRESO'));
+ALTER TABLE MOVIMIENTO_CAJA ADD CONSTRAINT ck_caja_monto
+    CHECK (monto > 0);
+
+ALTER TABLE ACTIVO_FIJO ADD CONSTRAINT ck_activo_valor
+    CHECK (valor >= 0);
+ALTER TABLE ACTIVO_FIJO ADD CONSTRAINT ck_activo_estado
+    CHECK (estado IN ('ACTIVO','MANTENIMIENTO','BAJA'));
+
+ALTER TABLE GASTO_PLANILLA ADD CONSTRAINT ck_plan_monto
+    CHECK (monto > 0);
+
+ALTER TABLE ENTREGA ADD CONSTRAINT ck_entrega_eta
+    CHECK (tiempo_estimado IS NULL OR tiempo_estimado >= 0);
+ALTER TABLE ENTREGA ADD CONSTRAINT ck_entrega_estado
+    CHECK (estado IN ('CREADA','ASIGNADA','PREPARADA','EN_RUTA','ENTREGADA','CANCELADA'));
