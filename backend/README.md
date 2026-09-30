@@ -1,7 +1,7 @@
 # Backend — Día 9
 
 Base técnica y autenticación en JavaScript con Express, dotenv, cors y node-oracledb.
-Requiere Node.js 22 o superior (verificado con Node.js 24). No contiene módulos de negocio.
+Requiere Node.js 22 o superior (verificado con Node.js 24). Incluye autenticación y el catálogo de sucursales del Día 10.
 
 ## Preparación y ejecución
 
@@ -187,5 +187,74 @@ revocación, refresh tokens ni consulta del estado del usuario en cada petición
    Repetir con contraseña incorrecta y esperar el error genérico 401. No compartir
    ni registrar la contraseña o el token obtenido.
 
-No se agregaron endpoints de negocio para probar Bearer: los middlewares se
-verifican con rutas temporales creadas exclusivamente dentro de las pruebas.
+Los middlewares también se verifican con rutas temporales creadas exclusivamente
+dentro de las pruebas.
+
+## Sucursales — Día 10
+
+Todas las rutas requieren `Authorization: Bearer <token>`. Las consultas admiten
+cualquier usuario autenticado; las escrituras exigen `nombre_rol: ADMINISTRADOR`
+del JWT validado, sin asumir un ID fijo. `authorizeRoles` admite ahora nombres
+exactos de rol o identificadores numéricos, conservando su uso anterior.
+
+| Método y ruta | Resultado |
+| --- | --- |
+| `GET /api/sucursales` | 200, `data` es un arreglo ordenado por ID, incluidas inactivas |
+| `GET /api/sucursales/:id` | 200, `data` es la sucursal |
+| `POST /api/sucursales` | 201, sucursal creada y cabecera `Location` |
+| `PUT /api/sucursales/:id` | 200, sucursal actualizada |
+| `PATCH /api/sucursales/:id/estado` | 200, sucursal con el estado actualizado |
+
+POST recibe los cinco campos de texto obligatorios y, opcionalmente, `activa`
+(predeterminado `S`). PUT requiere los seis campos editables completos:
+
+```json
+{
+  "nombre": "Sucursal de prueba",
+  "tipo_sucursal": "FARMACIA",
+  "departamento": "Guatemala",
+  "municipio": "Guatemala",
+  "direccion": "Zona 1",
+  "activa": "S"
+}
+```
+
+PATCH recibe exclusivamente `{ "activa": "N" }` o `{ "activa": "S" }`.
+No existe DELETE físico. Los tipos permitidos son `FARMACIA` y `STAND`.
+Se recortan espacios externos de los textos y se rechazan campos desconocidos,
+vacíos, tipos incorrectos e identificadores fuera de 1 a 9999999999.
+Los límites UTF-8 son: nombre 100 bytes, tipo 30, departamento y municipio 50,
+dirección 200, compatibles con los VARCHAR2 de la baseline con semántica BYTE.
+
+Errores: 400 para entrada/ID inválido, 401 para autenticación inválida, 403 para
+rol no autorizado, 404 `SUCURSAL_NOT_FOUND`, 503 si no se obtiene conexión y 500
+para otros errores internos, sin detalles Oracle.
+
+La implementación sigue routes → controller → service → repository → Oracle.
+`database/connection.js` administra conexiones, commit y rollback; los servicios
+delimitan las transacciones. Las escrituras y la lectura de su resultado usan la
+misma conexión y confirman solo al finalizar. Los repositorios usan binds y
+`RETURNING` para recuperar el ID generado por Oracle.
+
+`sucursales.service.requireActive(id, connection)` rechaza con 409
+`SUCURSAL_INACTIVE` una sucursal inactiva. Los futuros módulos operativos deberán
+invocarlo dentro de su transacción y coordinar el bloqueo requerido por esa
+operación. En esta entrega no existen operaciones de inventario/venta que puedan
+usar sucursales; el catálogo mantiene las inactivas consultables y reactivables.
+
+### Verificación manual pendiente
+
+Las pruebas automatizadas simulan Oracle y no alteran datos reales. Para verificar
+SQL y persistencia, usar una base de pruebas separada con el modelo oficial y
+cuentas de prueba con hash bcrypt válido:
+
+1. Obtener JWT de administrador y de otro rol mediante login.
+2. Consultar listado y detalle con ambos tokens; sin token debe responder 401.
+3. Con administrador, crear una sucursal, guardar su ID, actualizar sus campos y
+   alternar `activa` entre `N` y `S`. Consultar después de cada escritura desde
+   otra petición para confirmar persistencia.
+4. Repetir escrituras con el otro rol y comprobar 403; verificar 400 para datos
+   incompletos/tipo inválido y 404 para un ID inexistente.
+
+Este procedimiento implica datos de prueba: no ejecutarlo contra los datos
+reales existentes dentro del alcance de esta tarea.
