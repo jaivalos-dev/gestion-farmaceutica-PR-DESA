@@ -2,7 +2,7 @@ const path = require('node:path');
 const dotenv = require('dotenv');
 
 function readConfig(env = process.env) {
-  const required = ['ORACLE_USER', 'ORACLE_PASSWORD', 'ORACLE_CONNECT_STRING'];
+  const required = ['ORACLE_USER', 'ORACLE_PASSWORD', 'ORACLE_CONNECT_STRING', 'JWT_SECRET'];
   const missing = required.filter((name) => !env[name]?.trim());
   if (missing.length) {
     throw new Error(`Faltan variables de entorno: ${missing.join(', ')}`);
@@ -14,6 +14,7 @@ function readConfig(env = process.env) {
   }
   return {
     port,
+    jwtSecret: env.JWT_SECRET,
     oracle: {
       user: env.ORACLE_USER.trim(),
       password: env.ORACLE_PASSWORD,

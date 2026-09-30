@@ -1,6 +1,6 @@
 # Backend — Día 9
 
-Base técnica en JavaScript con Express, dotenv, cors y node-oracledb.
+Base técnica y autenticación en JavaScript con Express, dotenv, cors y node-oracledb.
 Requiere Node.js 22 o superior (verificado con Node.js 24). No contiene módulos de negocio.
 
 ## Preparación y ejecución
@@ -21,11 +21,11 @@ Completar `backend/.env` localmente:
 | `ORACLE_PASSWORD` | Contraseña local del esquema; la plantilla está vacía |
 | `ORACLE_CONNECT_STRING` | Por ejemplo `localhost:1521/XEPDB1` |
 | `PORT` | Puerto HTTP, predeterminado `3000` |
+| `JWT_SECRET` | Secreto aleatorio largo definido localmente; obligatorio para JWT |
 
-Las variables Oracle son obligatorias. `PORT` debe estar entre 1 y 65535.
+Las variables Oracle y `JWT_SECRET` son obligatorias. `PORT` debe estar entre 1 y 65535.
 También pueden proporcionarse como variables del proceso; tienen prioridad sobre
-`backend/.env`. La aplicación no carga el `.env` de la raíz. `JWT_SECRET` está
-reservado en la plantilla para otra etapa y no se utiliza ni se valida todavía.
+`backend/.env`. La aplicación no carga el `.env` de la raíz.
 No versionar `.env` ni compartir su contenido.
 
 ```powershell
@@ -67,7 +67,7 @@ Si falla la conexión, la consulta o la liberación de la conexión, devuelve HT
 }
 ```
 
-La única sentencia ejecutada es `SELECT 1 FROM dual`. No requiere consultar las
+La única sentencia ejecutada por health es `SELECT 1 FROM dual`. No requiere consultar las
 tablas del proyecto ni ejecutar DML o DDL. El mensaje de arranque confirma que HTTP
 escucha; solo el health check confirma la conexión efectiva con Oracle.
 
@@ -82,12 +82,16 @@ src/
   config/env.js                  Variables y validación
   database/pool.js               Inicializar, obtener conexión y cerrar pool
   middlewares/errorHandler.js    Errores HTTP centralizados
+  middlewares/authenticate.js    Bearer JWT y contexto req.user
+  middlewares/authorizeRoles.js  Autorización por id_rol
+  modules/auth/                 Routes, controller, service y repository de login
   modules/health/
     health.routes.js
     health.controller.js
     health.service.js
     health.repository.js
   shared/AppError.js             Error HTTP controlado
+  shared/tokens.js               Firma y verificación JWT HS256
   app.js                        Configuración Express
   server.js                     Arranque y cierre del proceso
 test/                           Pruebas técnicas sin Oracle
@@ -117,11 +121,71 @@ npm.cmd test
 npm.cmd ls --depth=0
 ```
 
-Las pruebas cubren configuración y HTTP con un sustituto del driver para simular
-Oracle disponible, conexión rechazada y consulta fallida. No prueban conectividad
-real ni reglas de negocio. La validación contra Oracle requiere el procedimiento
-manual anterior.
+Las pruebas cubren configuración, health, login, JWT y autorización por rol.
+Usan bcrypt y JWT reales, credenciales ficticias y secretos aleatorios de prueba.
+Sustituyen la conexión Oracle; no prueban conectividad real ni modifican datos.
 
-Dependencias directas: `express`, `oracledb`, `dotenv`, `cors`.
+Dependencias directas: `express`, `oracledb`, `dotenv`, `cors`, `bcrypt`, `jsonwebtoken`.
 Se versiona `package-lock.json` para reproducir la instalación. No se utiliza nodemon;
 `node --watch` y `node --test` cubren desarrollo y pruebas sin dependencias adicionales.
+
+## Login y seguridad base
+
+`POST /api/auth/login` es público y recibe JSON:
+
+```json
+{ "correo": "usuario@example.com", "password": "contraseña-ficticia" }
+```
+
+Devuelve `ok`, `message` y `data: { token, user }`. El contexto `user` contiene
+`id_usuario`, `id_rol`, `nombre_rol` e `id_sucursal` (puede ser `null`). El JWT
+incluye ese contexto y las marcas `iat`/`exp`; usa HS256 y vence en una hora.
+No se devuelven el correo, la contraseña ni el hash. La respuesta no se almacena
+en caché. El evento de acceso se registra en consola con el identificador del
+usuario, sin token ni credenciales; no se escribe en AUDITORIA en esta etapa.
+
+El correo se recorta en sus extremos y se consulta con igualdad exacta mediante
+un bind de Oracle, sin convertir mayúsculas/minúsculas. La contraseña se conserva
+exactamente y admite hasta 72 bytes UTF-8, límite de bcrypt.
+
+- `400 INVALID_INPUT`: entrada ausente o formato inválido.
+- `401 INVALID_CREDENTIALS`: correo inexistente, contraseña incorrecta o usuario
+  inactivo; todos reciben el mismo mensaje.
+- `503 DATABASE_UNAVAILABLE`: no se puede adquirir conexión Oracle.
+- `500 INTERNAL_ERROR`: error interno, sin detalles de SQL ni del driver.
+
+Para futuras rutas protegidas, aplicar en este orden:
+
+```javascript
+const authenticate = require('./middlewares/authenticate');
+const authorizeRoles = require('./middlewares/authorizeRoles');
+// IDs de roles definidos para la ruta según los datos existentes:
+router.get('/ruta-protegida', authenticate, authorizeRoles(1, 2), controller);
+```
+
+`authenticate` valida `Authorization: Bearer <token>` y asigna el contexto a
+`req.user`; tokens ausentes, inválidos o vencidos producen 401. `authorizeRoles`
+compara identificadores numéricos de rol y devuelve 403 si no está permitido.
+Una lista vacía rechaza todos los roles. El contexto de sucursal queda disponible
+para las reglas de futuros módulos. Health permanece público.
+
+Los tokens conservan el contexto emitido hasta vencer; esta etapa no incluye
+revocación, refresh tokens ni consulta del estado del usuario en cada petición.
+
+### Prueba manual contra Oracle real
+
+1. Completar las variables Oracle y `JWT_SECRET` en `backend/.env`, sin sobrescribir
+   las credenciales locales existentes ni versionar el archivo.
+2. Disponer de un USUARIO existente con `activo = 'S'`, ROL relacionado y
+   `password_hash` bcrypt válido cuya contraseña se conozca. Un hash de ejemplo
+   o marcador de los datos demo no permite iniciar sesión. Si no existe una cuenta
+   utilizable, su preparación requiere una tarea autorizada de datos; este cambio
+   no crea ni actualiza usuarios.
+3. Ejecutar `npm.cmd start` y comprobar `GET http://localhost:3000/api/health`.
+4. Desde un cliente REST local enviar el JSON con las credenciales conocidas a
+   `POST http://localhost:3000/api/auth/login`. Esperar HTTP 200 y `data.token`.
+   Repetir con contraseña incorrecta y esperar el error genérico 401. No compartir
+   ni registrar la contraseña o el token obtenido.
+
+No se agregaron endpoints de negocio para probar Bearer: los middlewares se
+verifican con rutas temporales creadas exclusivamente dentro de las pruebas.
