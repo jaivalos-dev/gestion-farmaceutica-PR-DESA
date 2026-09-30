@@ -1,7 +1,7 @@
 # Backend — Día 9
 
 Base técnica y autenticación en JavaScript con Express, dotenv, cors y node-oracledb.
-Requiere Node.js 22 o superior (verificado con Node.js 24). Incluye autenticación y el catálogo de sucursales del Día 10.
+Requiere Node.js 22 o superior (verificado con Node.js 24). Incluye autenticación y los catálogos de sucursales y medicamentos del Día 10.
 
 ## Preparación y ejecución
 
@@ -258,3 +258,70 @@ cuentas de prueba con hash bcrypt válido:
 
 Este procedimiento implica datos de prueba: no ejecutarlo contra los datos
 reales existentes dentro del alcance de esta tarea.
+
+## Medicamentos — Día 10
+
+Todas las rutas exigen JWT. GET admite cualquier usuario autenticado; POST, PUT
+y PATCH permiten ADMINISTRADOR o ENCARGADO. Por decisión de implementación del
+MVP, «encargado autorizado» de CU-04 significa rol ENCARGADO. Esta decisión se
+aplica exclusivamente a MEDICAMENTO; no cambia los permisos de Sucursales.
+
+| Método y ruta | Resultado |
+| --- | --- |
+| `GET /api/medicamentos` | 200, arreglo ordenado por ID, incluidos inactivos |
+| `GET /api/medicamentos/:id` | 200, medicamento |
+| `POST /api/medicamentos` | 201, medicamento creado y cabecera Location |
+| `PUT /api/medicamentos/:id` | 200, medicamento actualizado |
+| `PATCH /api/medicamentos/:id/estado` | 200, medicamento con estado actualizado |
+
+Ejemplo de entrada POST/PUT:
+
+```json
+{
+  "codigo": "PRUEBA-001",
+  "nombre": "Medicamento de prueba",
+  "categoria": "Analgesico",
+  "presentacion": "Tabletas",
+  "precio": 0,
+  "activo": "S"
+}
+```
+
+Los campos de texto son obligatorios; se recortan sus espacios externos. Límites
+UTF-8 conforme al criterio BYTE usado en los catálogos: codigo 30, nombre 120,
+categoria 60 y presentacion 80. El código conserva mayúsculas/minúsculas y la
+constraint `UQ_MED_CODIGO` garantiza unicidad, también ante escrituras concurrentes.
+Una violación de esa constraint produce 409 `MEDICAMENTO_CODE_DUPLICATE` sin
+exponer ORA-00001. Otras excepciones internas conservan el manejo centralizado.
+
+`precio` debe ser un número JSON finito mayor o igual a cero. Cero es válido por
+`CK_MED_PRECIO`. Debe caber en `NUMBER(10,2)`; se permiten decimales adicionales
+para que Oracle aplique su redondeo a dos decimales. Se rechazan valores desde
+99999999.995 porque el redondeo excedería los ocho dígitos enteros disponibles.
+La respuesta vuelve a consultar la fila persistida para devolver el precio Oracle.
+
+POST admite omitir `activo` (predeterminado `S`); PUT exige todos los campos.
+PATCH acepta exclusivamente `{ "activo": "S" }` o `{ "activo": "N" }`.
+Se rechazan campos desconocidos e ID fuera de 1 a 9999999999. No existe DELETE.
+Las respuestas de error usan 400 para entrada inválida, 401/403 para acceso,
+404 `MEDICAMENTO_NOT_FOUND`, 503 para conexión no disponible y 500 para otros
+errores internos. Las escrituras usan los helpers existentes de transacciones.
+
+Los inactivos siguen consultables. El servicio `requireActive(id, connection)`
+devuelve 409 `MEDICAMENTO_INACTIVE` para futuras operaciones. Los futuros módulos
+deberán invocarlo en su transacción y coordinar los bloqueos que necesiten.
+
+### Prueba manual pendiente contra Oracle
+
+Usar una instancia separada de pruebas con la baseline oficial y cuentas de
+ADMINISTRADOR, ENCARGADO y AUDITOR. No se modificaron datos Oracle reales.
+
+1. Obtener tokens con login y consultar listado/detalle; sin JWT debe responder 401.
+2. Crear con ADMINISTRADOR y ENCARGADO, comprobar precio cero y redondeo, actualizar
+   y alternar activo S/N. Reconsultar desde otra petición para verificar commit.
+3. Repetir un código en POST y PUT y comprobar 409 sin detalles Oracle ni cambios
+   parciales. Confirmar 403 en escrituras con AUDITOR y que ENCARGADO continúa sin
+   poder escribir en Sucursales.
+4. Verificar errores por campos ausentes, negativos, longitudes y estados inválidos,
+   además de ID inexistente. Las pruebas automatizadas simulan la conexión y no
+   sustituyen esta comprobación de SQL, redondeo y constraints en Oracle XE.
