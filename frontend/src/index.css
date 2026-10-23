@@ -1,0 +1,16 @@
+body {
+  min-height: 100vh;
+  background-color: #f1f3f5;
+}
+.site-header { background-color: #203f59; }
+.system-name {
+  max-width: 21rem;
+  white-space: normal;
+  font-size: 1rem;
+}
+.site-header .nav-link.active {
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: .4rem;
+}
+.login-card { max-width: 440px; }
