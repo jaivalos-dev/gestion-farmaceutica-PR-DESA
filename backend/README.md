@@ -1,7 +1,7 @@
 # Backend — Día 9
 
 Base técnica y autenticación en JavaScript con Express, dotenv, cors y node-oracledb.
-Requiere Node.js 22 o superior (verificado con Node.js 24). Incluye autenticación y los catálogos de sucursales y medicamentos del Día 10.
+Requiere Node.js 22 o superior (verificado con Node.js 24). Incluye autenticación, los catálogos de sucursales y medicamentos del Día 10 e inventario del Día 11–12.
 
 ## Preparación y ejecución
 
@@ -239,8 +239,8 @@ misma conexión y confirman solo al finalizar. Los repositorios usan binds y
 `sucursales.service.requireActive(id, connection)` rechaza con 409
 `SUCURSAL_INACTIVE` una sucursal inactiva. Los futuros módulos operativos deberán
 invocarlo dentro de su transacción y coordinar el bloqueo requerido por esa
-operación. En esta entrega no existen operaciones de inventario/venta que puedan
-usar sucursales; el catálogo mantiene las inactivas consultables y reactivables.
+operación. Inventario valida sucursales activas en su Service; el catálogo mantiene
+las inactivas consultables y reactivables.
 
 ### Verificación manual pendiente
 
@@ -325,3 +325,89 @@ ADMINISTRADOR, ENCARGADO y AUDITOR. No se modificaron datos Oracle reales.
 4. Verificar errores por campos ausentes, negativos, longitudes y estados inválidos,
    además de ID inexistente. Las pruebas automatizadas simulan la conexión y no
    sustituyen esta comprobación de SQL, redondeo y constraints en Oracle XE.
+
+## Inventario — Día 11–12 (CU-05)
+
+Baseline confirmada para esta iteración: ENTRADA aumenta existencia, SALIDA la
+disminuye y AJUSTE representa exclusivamente un ajuste positivo justificado.
+Las correcciones negativas usan SALIDA. Solo ENTRADA puede crear una combinación
+sucursal–medicamento inexistente; SALIDA y AJUSTE devuelven 404 en ese caso.
+
+Todas las rutas requieren JWT. ADMINISTRADOR consulta y opera cualquier sucursal;
+ENCARGADO consulta y opera únicamente su sucursal asignada en el JWT, con 403 si
+carece de asignación o solicita otra sucursal. AUDITOR consulta todas las sucursales
+sin escritura. DESPACHO no tiene acceso. Las consultas conservan visible el historial
+de sucursales y medicamentos inactivos; las escrituras requieren ambos activos.
+
+| Método y ruta | Resultado |
+| --- | --- |
+| `GET /api/inventario` | 200, arreglo; filtros opcionales `id_sucursal` e `id_medicamento` |
+| `GET /api/inventario/:id` | 200, inventario con sucursal, medicamento, código, existencia y fecha |
+| `GET /api/inventario/:id/movimientos` | 200, historial por fecha e ID descendentes |
+| `POST /api/inventario/ajustes` | 201, movimiento con identificadores y saldos calculados |
+
+El listado de ENCARGADO aplica automáticamente su sucursal aunque omita el filtro.
+Detalle e historial inexistentes responden 404 `INVENTARIO_NOT_FOUND`.
+
+Contrato POST (IDs ilustrativos, deben existir en la base de pruebas):
+
+```json
+{
+  "id_sucursal": 2,
+  "id_medicamento": 3,
+  "tipo_movimiento": "ENTRADA",
+  "cantidad": 4,
+  "referencia": "Recepción autorizada"
+}
+```
+
+Solo se aceptan esos cinco campos. IDs y cantidad son números JSON enteros entre
+1 y 9999999999. Referencia es obligatoria para todos los movimientos, se recorta
+y admite hasta 100 bytes UTF-8, siguiendo la semántica BYTE de los catálogos.
+El usuario se obtiene del JWT; saldos se calculan en backend, IDs y fechas se
+generan en Oracle. Se rechazan campos de usuario/saldo/fecha enviados por el cliente.
+El endpoint admite únicamente ENTRADA, SALIDA y AJUSTE; VENTA,
+TRANSFERENCIA_DESPACHO, TRANSFERENCIA_RECEPCION y REVERSO están reservados a otros módulos,
+aunque la constraint `CK_MOV_INV_TIPO` los permite.
+
+Service usa `withTransaction` con una sola conexión: valida catálogos, consulta
+INVENTARIO con `SELECT ... FOR UPDATE`, calcula saldos, actualiza existencia y
+fecha, e inserta MOVIMIENTO_INVENTARIO antes de COMMIT. Para ENTRADA inicial crea
+INVENTARIO e inserta el movimiento con saldo anterior cero en la misma transacción.
+Todo fallo intenta ROLLBACK y libera la conexión mediante `finally`.
+La constraint `UQ_INV_SUC_MED` resuelve carreras de creación: el perdedor recibe
+409 `INVENTARIO_CONFLICT` y debe volver a consultar antes de reintentar. No se
+reintentan automáticamente escrituras. El bloqueo usa el timeout existente de conexión.
+
+Errores de entrada: 400 `INVALID_ID`, `INVALID_QUANTITY`, `INVALID_MOVEMENT_TYPE`,
+`INVALID_REFERENCE` o `INVALID_INPUT`. También se controla el desbordamiento del
+saldo NUMBER(10). Errores funcionales: 404 `SUCURSAL_NOT_FOUND`,
+`MEDICAMENTO_NOT_FOUND`, `INVENTARIO_NOT_FOUND`; 409 `SUCURSAL_INACTIVE`,
+`MEDICAMENTO_INACTIVE`, `INSUFFICIENT_STOCK`, `INVENTARIO_CONFLICT`.
+Autenticación/autorización: 401/403. Conexión no disponible: 503. Otros fallos:
+500 `INTERNAL_ERROR`, sin SQL, ORA, credenciales ni trazas.
+
+**Dependencia pendiente:** integrar AUDITORIA mediante el servicio transversal futuro.
+MOVIMIENTO_INVENTARIO se registra siempre, pero no sustituye esa integración.
+
+### Validación manual pendiente en Oracle XE
+
+Usar una instancia de pruebas con el esquema oficial, usuarios de los cuatro roles,
+dos sucursales y medicamentos activos/inactivos. Las pruebas automáticas sustituyen
+la conexión Oracle y no modifican datos reales.
+
+1. Consultar listado, filtros, detalle e historial. Verificar 401 sin JWT, 403 para
+   DESPACHO, AUDITOR solo lectura y aislamiento por sucursal de ENCARGADO.
+2. Ejecutar ENTRADA, SALIDA y AJUSTE sobre un inventario existente y reconsultar desde
+   otra petición. Comprobar saldos, usuario JWT, fechas Oracle y un movimiento por cambio.
+3. Ejecutar ENTRADA inicial para una combinación ausente: verificar una sola fila y
+   movimiento de 0 a cantidad. Confirmar que SALIDA/AJUSTE ausentes no crean filas.
+4. Rechazar salida excesiva, cantidades inválidas, tipos reservados, referencia vacía,
+   sucursal/medicamento inactivo; verificar que saldo e historial no cambian.
+5. Lanzar dos salidas simultáneas cuya suma exceda el stock: verificar serialización
+   y rechazo de una, sin saldo negativo. Lanzar dos entradas iniciales simultáneas:
+   verificar unicidad y 409 controlado si ambas observaron la combinación ausente.
+6. En un entorno de ensayo con inyección de fallos en la aplicación, provocar error
+   tras UPDATE o INSERT inicial y antes de insertar el movimiento. Comprobar desde
+   otra conexión que ROLLBACK restauró todo y que la conexión fue liberada. No cambiar
+   los scripts oficiales ni las tablas para provocar el fallo.

@@ -4,6 +4,7 @@ const healthRoutes = require('./modules/health/health.routes');
 const authRoutes = require('./modules/auth/auth.routes');
 const sucursalesRoutes = require('./modules/sucursales/sucursales.routes');
 const medicamentosRoutes = require('./modules/medicamentos/medicamentos.routes');
+const inventarioRoutes = require('./modules/inventario/inventario.routes');
 const errorHandler = require('./middlewares/errorHandler');
 const AppError = require('./shared/AppError');
 
@@ -17,6 +18,7 @@ function createApp() {
   app.use('/api/auth', authRoutes);
   app.use('/api/sucursales', sucursalesRoutes);
   app.use('/api/medicamentos', medicamentosRoutes);
+  app.use('/api/inventario', inventarioRoutes);
   app.use((req, res, next) => next(new AppError(404, 'NOT_FOUND', 'Ruta no encontrada')));
   app.use(errorHandler);
   return app;
