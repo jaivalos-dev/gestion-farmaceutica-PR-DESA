@@ -9,6 +9,7 @@ const transferenciasRoutes = require('./modules/transferencias/transferencias.ro
 const ventasRoutes = require('./modules/ventas/ventas.routes');
 const cajaRoutes = require('./modules/caja/caja.routes');
 const activosRoutes = require('./modules/activos/activos.routes');
+const planillaRoutes = require('./modules/planilla/planilla.routes');
 const errorHandler = require('./middlewares/errorHandler');
 const AppError = require('./shared/AppError');
 
@@ -27,6 +28,7 @@ function createApp() {
   app.use('/api/ventas', ventasRoutes);
   app.use('/api/caja', cajaRoutes);
   app.use('/api/activos', activosRoutes);
+  app.use('/api/planilla', planillaRoutes);
   app.use((req, res, next) => next(new AppError(404, 'NOT_FOUND', 'Ruta no encontrada')));
   app.use(errorHandler);
   return app;
