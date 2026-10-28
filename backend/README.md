@@ -411,3 +411,167 @@ la conexión Oracle y no modifican datos reales.
    tras UPDATE o INSERT inicial y antes de insertar el movimiento. Comprobar desde
    otra conexión que ROLLBACK restauró todo y que la conexión fue liberada. No cambiar
    los scripts oficiales ni las tablas para provocar el fallo.
+
+## Entregas y disponibilidad (CU-11, CU-12, CI-01)
+
+Todas las rutas requieren JWT. CI-01 usa el mismo REST/JSON que puede consumir React;
+no incorpora cuentas externas ni otro mecanismo de autenticación.
+
+| Método y ruta | Permisos y resultado |
+| --- | --- |
+| `GET /api/disponibilidad` | ENCARGADO, DESPACHO y ADMINISTRADOR; 200 con disponibilidad y candidatos globales |
+| `GET /api/entregas` | ENCARGADO en su sucursal; DESPACHO y ADMINISTRADOR global; 200 con arreglo |
+| `GET /api/entregas/:id` | Mismos permisos de lectura; 200 con entrega o 404 |
+| `POST /api/entregas` | Solo ENCARGADO para venta de su sucursal; 201 con entrega y cabecera Location |
+| `PUT /api/entregas/:id/estado` | ENCARGADO/DESPACHO según transición; 200 con entrega actualizada |
+
+AUDITOR no accede a estos módulos operativos. No existen DELETE, actualización
+genérica ni reasignación de sucursal. Los históricos de sucursales inactivas
+siguen consultables. Crear entrega requiere sucursal activa; las transiciones de
+entregas ya creadas permiten completar su seguimiento sin exigir reactivación.
+
+### Disponibilidad y ETA
+
+Ejemplo: `GET /api/disponibilidad?id_medicamento=1&cantidad=2&departamento=Guatemala&municipio=Guatemala`.
+Los cuatro parámetros son obligatorios. ID/cantidad son enteros positivos de hasta
+10 dígitos; departamento/municipio son textos no vacíos de hasta 50 bytes UTF-8.
+Solo se proponen sucursales y medicamentos activos con existencia suficiente.
+Un medicamento inexistente devuelve 404; uno inactivo, 409. Sin candidatos es 200.
+
+La comparación de ubicación recorta espacios exteriores, normaliza Unicode NFC
+y compara sin distinguir mayúsculas; conserva las tildes. Se ordena por prioridad
+ascendente, existencia descendente e ID de sucursal ascendente:
+
+| Coincidencia | Prioridad | tiempo_estimado (minutos) | eta_disponible |
+| --- | --- | --- | --- |
+| Departamento y municipio | 1 | 30 | true |
+| Departamento, distinto municipio | 2 | 60 | true |
+| Departamento distinto | 3 | null | false |
+
+El ETA es una regla simple del MVP, no representa distancia ni tránsito real.
+Cada candidato contiene `id_sucursal`, `nombre`, `tipo_sucursal`, `departamento`,
+`municipio`, `existencia`, `cantidad_solicitada`, `prioridad`, `tiempo_estimado`,
+`eta_disponible` y `formas_pago` (EFECTIVO, TARJETA, TRANSFERENCIA, OTRO).
+
+Respuesta sin disponibilidad:
+
+```json
+{
+  "ok": true,
+  "data": { "disponible": false, "id_medicamento": 1, "cantidad": 2, "candidatos": [] },
+  "message": "Disponibilidad informativa; no reserva stock. ETA básico del MVP"
+}
+```
+
+Esta consulta no persiste datos ni reserva stock. La confirmación de VENTA vuelve
+a validar stock y es la operación que lo descuenta. Seleccionar una candidata no
+otorga al ENCARGADO permisos para vender en otra sucursal: debe intervenir un
+usuario autorizado de esa sucursal.
+
+### Creación y ciclo logístico
+
+```json
+{
+  "id_venta": 1,
+  "nombre_cliente": "Cliente Demo",
+  "telefono": "55551234",
+  "direccion": "Zona 1, dirección demo",
+  "departamento": "Guatemala",
+  "municipio": "Guatemala",
+  "observaciones": "Entregar en recepción"
+}
+```
+
+Se acepta únicamente una VENTA CONFIRMADA sin entrega previa. `id_sucursal` se
+deriva de VENTA; el cliente no puede enviar ID de entrega, sucursal, estado, ETA
+ni fechas. Se calcula ETA con la misma regla de disponibilidad. El flujo es:
+consultar disponibilidad, elegir sucursal candidata, crear/confirmar venta en esa
+sucursal y crear su entrega. No se reasigna la sucursal tras confirmar la venta.
+
+Modelo confirmado en `01_schema.sql` y `02_constraints.sql`, sin cambios:
+
+| Campo | Tipo y reglas |
+| --- | --- |
+| id_entrega | NUMBER(10), IDENTITY BY DEFAULT, PK |
+| id_venta | NUMBER(10), NOT NULL, FK VENTA, UNIQUE UQ_ENTREGA_VENTA |
+| id_sucursal | NUMBER(10), NOT NULL, FK SUCURSAL |
+| nombre_cliente | VARCHAR2(100), NOT NULL |
+| telefono | VARCHAR2(20), NOT NULL |
+| direccion | VARCHAR2(200), NOT NULL |
+| departamento, municipio | VARCHAR2(50), NOT NULL cada uno |
+| tiempo_estimado | NUMBER(5), NULL permitido; CHECK NULL o >= 0 |
+| estado | VARCHAR2(20), NOT NULL, CHECK con los seis estados del MVP |
+| fecha_solicitud | TIMESTAMP, DEFAULT SYSTIMESTAMP, NOT NULL |
+| fecha_entrega | TIMESTAMP, NULL permitido |
+| observaciones | VARCHAR2(250), NULL permitido |
+
+Los textos se recortan; los obligatorios no pueden quedar vacíos. Se validan bytes
+UTF-8 como en los módulos existentes. Observaciones omitidas, null o en blanco se
+guardan como null. No hay otros defaults en ENTREGA.
+
+El cambio de estado admite solo un campo, por ejemplo `{"estado":"ASIGNADA"}`:
+
+| Transición | Actor |
+| --- | --- |
+| CREADA → ASIGNADA | ENCARGADO de la sucursal |
+| ASIGNADA → PREPARADA | ENCARGADO de la sucursal |
+| PREPARADA → EN_RUTA | DESPACHO |
+| EN_RUTA → ENTREGADA | DESPACHO |
+| CREADA / ASIGNADA / PREPARADA → CANCELADA | ENCARGADO de la sucursal |
+
+ENTREGADA y CANCELADA son terminales; no se repiten ni se permiten saltos.
+Oracle genera `fecha_solicitud` al crear y `fecha_entrega` al pasar a ENTREGADA;
+antes de ese estado, fecha_entrega permanece null. Cancelar no anula la venta.
+Ninguna operación de ENTREGA cambia INVENTARIO, genera MOVIMIENTO_INVENTARIO
+ni devuelve stock. Tampoco modifica caja.
+
+Los filtros opcionales del listado son `estado`, `id_sucursal`, `id_venta`,
+`departamento` y `municipio`. Los textos se comparan por igualdad sin distinguir
+mayúsculas y recortando espacios exteriores. ENCARGADO queda limitado por su JWT;
+intentar consultar otra sucursal devuelve 403 FORBIDDEN_BRANCH.
+
+Las escrituras reutilizan `withTransaction`: commit, rollback ante fallo y cierre
+de conexión. La creación bloquea la venta; el cambio de estado usa SELECT FOR UPDATE
+en ENTREGA antes de validar la transición. La constraint UNIQUE protege también
+frente a escritores concurrentes. Todos los valores SQL usan binds.
+
+Errores 400: INVALID_ID, INVALID_QUANTITY, INVALID_LOCATION, INVALID_INPUT,
+INVALID_CLIENT_NAME, INVALID_PHONE, INVALID_ADDRESS, INVALID_DEPARTMENT,
+INVALID_MUNICIPALITY, INVALID_OBSERVATIONS, INVALID_DELIVERY_STATE.
+Errores 404: MEDICAMENTO_NOT_FOUND, VENTA_NOT_FOUND, SUCURSAL_NOT_FOUND,
+ENTREGA_NOT_FOUND. Errores 409: MEDICAMENTO_INACTIVE, SUCURSAL_INACTIVE,
+INVALID_SALE_STATE, DELIVERY_ALREADY_EXISTS, INVALID_DELIVERY_TRANSITION,
+ENTREGA_CONFLICT. Autenticación/autorización: 401/403; Oracle no disponible: 503;
+otros fallos: 500 INTERNAL_ERROR sin ORA, SQL ni trazas.
+
+**Pendiente:** auditoría transversal para creación, asignación, cambios y
+cancelación. No se crea una implementación aislada. El seed 04 incluye el rol
+DESPACHO, pero no una cuenta de ese rol. En `/docs` no se encontraron documentos
+01, 02, 07 ni Plan Maestro; se contrastaron los disponibles 03, 05, 06, 09 y 10.
+
+### Pruebas manuales pendientes en Oracle XE
+
+Las pruebas automáticas reemplazan únicamente Oracle; no modifican una base real.
+En una instancia de pruebas, con cuentas ENCARGADO y DESPACHO válidas:
+
+1. Consultar disponibilidad del ID correspondiente a MED-001.
+2. Comprobar que los candidatos tienen stock suficiente y sucursal activa.
+3. Comprobar prioridades de municipio/departamento y orden determinista.
+4. Comprobar caso sin disponibilidad: 200 y candidatos vacíos.
+5. Crear y confirmar una nueva venta de prueba.
+6. Crear la ENTREGA asociada a esa venta.
+7. Verificar que id_sucursal se derivó de la venta.
+8. Verificar ETA 30, 60 y null según ubicación.
+9. Ejecutar CREADA → ASIGNADA como ENCARGADO.
+10. Ejecutar ASIGNADA → PREPARADA como ENCARGADO.
+11. Ejecutar PREPARADA → EN_RUTA como DESPACHO.
+12. Ejecutar EN_RUTA → ENTREGADA como DESPACHO.
+13. Comprobar fecha_entrega generada por Oracle y rechazo de otra transición.
+14. Comparar stock e historial de movimientos antes/después de todos los estados.
+15. Comprobar rechazo de duplicado id_venta, incluso con dos peticiones simultáneas.
+16. Crear una segunda venta/entrega y cancelar antes de EN_RUTA, sin devolución de stock.
+17. Comprobar rechazo del ENCARGADO de otra sucursal.
+18. Comprobar permisos de DESPACHO para EN_RUTA/ENTREGADA y rechazo al crear/asignar.
+
+Además, ejecutar dos cambios simultáneos sobre la misma entrega para comprobar
+el bloqueo real y repetir lecturas desde otra conexión para verificar commit.
