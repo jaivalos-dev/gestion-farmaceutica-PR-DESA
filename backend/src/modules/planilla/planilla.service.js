@@ -1,3 +1,4 @@
+const auditoria = require('../auditoria/auditoria.service');
 const repository = require('./planilla.repository');
 const branches = require('../sucursales/sucursales.repository');
 const database = require('../../database/connection');
@@ -92,7 +93,11 @@ async function create(input, user) {
     if (!branch) throw new AppError(404, 'SUCURSAL_NOT_FOUND', 'Sucursal inexistente');
     if (branch.activa !== 'S') throw new AppError(409, 'SUCURSAL_INACTIVE', 'Sucursal inactiva');
     const id = await repository.create(connection, data);
-    // AUDITORIA queda pendiente del servicio transversal; usuario y fecha no la reemplazan.
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: data.id_sucursal,
+      modulo: 'PLANILLA', accion: 'REGISTRAR', entidad: 'GASTO_PLANILLA', id_entidad: id,
+      descripcion: `Gasto de planilla ${id} registrado; periodo ${data.periodo}; monto ${data.monto.toFixed(2)}`,
+    });
     return requireFound(await repository.findById(connection, id));
   });
 }

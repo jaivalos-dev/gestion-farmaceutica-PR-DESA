@@ -10,12 +10,26 @@ const password = randomBytes(18).toString('hex');
 const context = { id_usuario: 1, id_rol: 2, nombre_rol: 'Encargado', id_sucursal: 3 };
 const hash = bcrypt.hashSync(password, 4);
 
-async function setup(t, user, failure) {
+async function setup(t, user, failure, config = {}) {
   process.env.JWT_SECRET = secret;
   const database = require('../src/database/pool');
   let closed = false;
-  t.mock.method(database, 'getConnection', async () => ({
+  const events = [], audit = [];
+  let acquisitions = 0;
+  t.mock.method(database, 'getConnection', async () => {
+    const number = ++acquisitions;
+    events.push(`open:${number}`);
+    let pending;
+    return {
     execute: async (sql, binds, options) => {
+      if (/INSERT INTO AUDITORIA\b/.test(sql)) {
+        assert.equal(number, 2);
+        assert.equal(options.autoCommit, false);
+        if (config.failAudit) throw new Error('ORA-99999 SQL privado');
+        pending = { ...binds };
+        return { rowsAffected: 1 };
+      }
+      assert.equal(number, 1);
       assert.match(sql, /JOIN ROL/i);
       assert.match(sql, /u.correo = :correo/);
       assert.equal(binds.correo, 'test@example.com');
@@ -23,13 +37,21 @@ async function setup(t, user, failure) {
       if (failure) throw new Error('detalle privado Oracle');
       return { rows: user ? [user] : [] };
     },
-    close: async () => { closed = true; },
-  }));
+    commit: async () => {
+      events.push(`commit:${number}`);
+      if (config.failCommit) throw new Error('ORA-99999 commit');
+      if (pending) audit.push(pending);
+    },
+    rollback: async () => events.push(`rollback:${number}`),
+    close: async () => { closed = true; events.push(`close:${number}`); },
+  };
+  });
   const { createApp } = require('../src/app');
   const server = createApp().listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   return {
+    events, audit, acquisitions: () => acquisitions,
     login: (body) => fetch(`http://127.0.0.1:${server.address().port}/api/auth/login`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     }),
@@ -38,6 +60,52 @@ async function setup(t, user, failure) {
 }
 
 const user = { ...context, password_hash: hash, activo: 'S' };
+
+for (const branch of [3, null]) test(`CU-14 LOGIN_OK sucursal ${branch} libera lectura antes de bcrypt y confirma antes de responder`, async t => {
+  const api = await setup(t, { ...user, id_sucursal: branch });
+  const compare = bcrypt.compare;
+  t.mock.method(bcrypt, 'compare', async (...args) => {
+    assert.deepEqual(api.events, ['open:1', 'close:1']);
+    api.events.push('bcrypt');
+    return compare(...args);
+  });
+  const response = await api.login({ correo: 'test@example.com', password });
+  assert.equal(response.status, 200);
+  assert.equal(api.audit.length, 1);
+  assert.deepEqual(api.audit[0], { id_usuario: 1, id_sucursal: branch, modulo: 'AUTH', accion: 'LOGIN_OK',
+    entidad: 'USUARIO', id_entidad: 1, descripcion: 'Usuario 1 autenticado correctamente' });
+  assert.deepEqual(api.events, ['open:1', 'close:1', 'bcrypt', 'open:2', 'commit:2', 'close:2']);
+  const body = await response.json();
+  for (const secretValue of [password, hash, body.data.token, 'test@example.com']) assert.equal(JSON.stringify(api.audit).includes(secretValue), false);
+});
+
+for (const config of [{ failAudit: true }, { failCommit: true }]) test(`CU-14 LOGIN_OK falla sin token si falla ${Object.keys(config)[0]}`, async t => {
+  const api = await setup(t, user, false, config);
+  const logs = [];
+  t.mock.method(console, 'info', (...args) => logs.push(args));
+  const response = await api.login({ correo: 'test@example.com', password });
+  assert.equal(response.status, 500);
+  const body = await response.json();
+  assert.equal(body.code, 'INTERNAL_ERROR');
+  assert.equal(body.data, undefined);
+  assert.deepEqual(api.audit, []);
+  assert.deepEqual(logs, []);
+  assert.deepEqual(api.events, ['open:1', 'close:1', 'open:2', ...(config.failCommit ? ['commit:2'] : []), 'rollback:2', 'close:2']);
+});
+
+for (const record of [null, user, { ...user, activo: 'N' }]) test(`CU-14 LOGIN_FALLIDO ${record ? record.activo : 'inexistente'} no audita ni expone secretos`, async t => {
+  const api = await setup(t, record);
+  const logs = [];
+  t.mock.method(console, 'info', (...args) => logs.push(args));
+  t.mock.method(console, 'error', (...args) => logs.push(args));
+  const response = await api.login({ correo: 'test@example.com', password: 'incorrecta-ficticia' });
+  assert.equal(response.status, 401);
+  assert.deepEqual(api.audit, []);
+  assert.equal(api.acquisitions(), 1);
+  assert.deepEqual(api.events, ['open:1', 'close:1']);
+  const output = JSON.stringify({ body: await response.json(), logs });
+  for (const value of [hash, password, 'incorrecta-ficticia', 'test@example.com', 'Authorization']) assert.equal(output.includes(value), false);
+});
 test('login válido usa bcrypt y entrega JWT limitado sin credenciales', async t => {
   const api = await setup(t, user);
   const response = await api.login({ correo: 'test@example.com', password });

@@ -6,6 +6,13 @@ const catalog = {
   SUCURSALES: { entidad: 'SUCURSAL', acciones: ['CREAR', 'MODIFICAR'] },
   MEDICAMENTOS: { entidad: 'MEDICAMENTO', acciones: ['CREAR', 'MODIFICAR'] },
   INVENTARIO: { entidad: 'INVENTARIO', acciones: ['ENTRADA', 'SALIDA', 'AJUSTE'] },
+  TRANSFERENCIAS: { entidad: 'TRANSFERENCIA', acciones: ['CREAR', 'CAMBIO_ESTADO'] },
+  VENTAS: { entidad: 'VENTA', acciones: ['CREAR', 'CONFIRMAR'] },
+  CAJA: { entidad: 'MOVIMIENTO_CAJA', acciones: ['REGISTRAR'] },
+  ACTIVOS: { entidad: 'ACTIVO_FIJO', acciones: ['CREAR', 'MODIFICAR'] },
+  PLANILLA: { entidad: 'GASTO_PLANILLA', acciones: ['REGISTRAR'] },
+  ENTREGAS: { entidad: 'ENTREGA', acciones: ['CREAR', 'CAMBIO_ESTADO'] },
+  AUTH: { entidad: 'USUARIO', acciones: ['LOGIN_OK'] },
 };
 const values = {
   modulo: Object.keys(catalog),

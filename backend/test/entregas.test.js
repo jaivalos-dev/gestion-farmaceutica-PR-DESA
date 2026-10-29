@@ -8,18 +8,56 @@ const input = { id_venta: 1, nombre_cliente: 'Cliente Demo', telefono: '55551234
 const initial = { ...input, id_entrega: 1, id_sucursal: 1, tiempo_estimado: 30, estado: 'CREADA', fecha_solicitud: '2026-10-27T10:00:00', fecha_entrega: null, observaciones: null };
 const states = ['CREADA', 'ASIGNADA', 'PREPARADA', 'EN_RUTA', 'ENTREGADA', 'CANCELADA'];
 
+test('CU-14 entrega creada audita sin datos personales ni stock', async t => {
+  const api = await setup(t);
+  assert.equal((await api.request('POST', '', { ...input, nombre_cliente: 'persona privada', telefono: '99999999', direccion: 'direccion privada', observaciones: 'password token Authorization' })).status, 201);
+  assert.equal(api.audit().length, 1);
+  const event = api.audit()[0];
+  assert.deepEqual([event.modulo, event.accion, event.entidad, event.id_entidad, event.id_usuario, event.id_sucursal],
+    ['ENTREGAS', 'CREAR', 'ENTREGA', 1, 1, 1]);
+  assert.doesNotMatch(event.descripcion, /persona|99999999|direccion privada|password|token|Authorization/);
+  assert.ok(api.calls.every(call => !/INVENTARIO|MOVIMIENTO_CAJA/.test(call.sql)));
+  assert.deepEqual(api.events, ['commit', 'close']);
+});
+for (const [from, to, role] of [['CREADA','ASIGNADA','ENCARGADO'], ['ASIGNADA','PREPARADA','ENCARGADO'],
+  ['PREPARADA','EN_RUTA','DESPACHO'], ['EN_RUTA','ENTREGADA','DESPACHO'],
+  ['CREADA','CANCELADA','ENCARGADO'], ['ASIGNADA','CANCELADA','ENCARGADO'], ['PREPARADA','CANCELADA','ENCARGADO']]) {
+  test(`CU-14 entrega ${from} -> ${to} audita transición sin stock`, async t => {
+    const api = await setup(t, { existing: true, state: from });
+    assert.equal((await api.request('PUT', '/1/estado', { estado: to }, role, role === 'DESPACHO' ? null : 1)).status, 200);
+    assert.equal(api.audit().length, 1);
+    const event = api.audit()[0];
+    assert.deepEqual([event.modulo, event.accion, event.entidad, event.id_entidad, event.id_usuario, event.id_sucursal],
+      ['ENTREGAS', 'CAMBIO_ESTADO', 'ENTREGA', 1, 1, 1]);
+    assert.ok(event.descripcion.includes(`${from} -> ${to}`));
+    assert.ok(api.calls.every(call => !/INVENTARIO|MOVIMIENTO_CAJA/.test(call.sql)));
+    assert.deepEqual(api.events, ['commit', 'close']);
+  });
+}
+for (const creating of [false, true]) test(`CU-14 entrega ${creating ? 'crear' : 'cambiar estado'} revierte si auditoría falla`, async t => {
+  const api = await setup(t, { existing: !creating, fail: /INSERT INTO AUDITORIA\b/ });
+  const before = api.rows();
+  assert.equal((await api.request(creating ? 'POST' : 'PUT', creating ? '' : '/1/estado', creating ? input : { estado: 'ASIGNADA' })).status, 500);
+  assert.deepEqual(api.rows(), before);
+  assert.deepEqual(api.audit(), []);
+  assert.deepEqual(api.events, ['rollback', 'close']);
+});
+
 // Se simula únicamente la conexión Oracle, manteniendo HTTP, JWT y las cuatro capas reales.
 async function setup(t, config = {}) {
+  let audit = [];
   process.env.JWT_SECRET = randomBytes(32).toString('hex');
   let rows = config.existing ? [{ ...initial, estado: config.state ?? 'CREADA', fecha_entrega: config.state === 'ENTREGADA' ? '2026-10-27T12:00:00' : null },
     { ...initial, id_entrega: 2, id_venta: 2, id_sucursal: 2, departamento: 'Sacatepequez', municipio: 'Antigua', estado: 'PREPARADA' }] : [];
   const calls = [], events = [];
   t.mock.method(pool, 'getConnection', async () => {
     const pending = structuredClone(rows);
+    const pendingAudit = structuredClone(audit);
     return {
       execute: async (sql, binds, options) => {
         calls.push({ sql, binds, options });
         if (config.fail?.test(sql)) throw new Error('ORA-99999 SQL privado');
+        if (/INSERT INTO AUDITORIA\b/.test(sql)) { pendingAudit.push({ ...binds }); return { rowsAffected: 1 }; }
         if (/FROM VENTA/.test(sql)) return { rows: config.missingSale ? [] : [{ id_venta: binds.id, id_sucursal: config.saleBranch ?? 1, estado: config.saleState ?? 'CONFIRMADA' }] };
         if (/FROM SUCURSAL/.test(sql)) return { rows: config.missingBranch ? [] : [{ id_sucursal: binds.id, activa: config.inactiveBranch ? 'N' : 'S', departamento: 'Guatemala', municipio: 'Guatemala' }] };
         if (/INSERT INTO ENTREGA/.test(sql)) {
@@ -37,7 +75,7 @@ async function setup(t, config = {}) {
           return { rowsAffected: 1 };
         }
         if (/FROM ENTREGA/.test(sql)) {
-          if (binds.id !== undefined) return { rows: pending.filter(row => row.id_entrega === binds.id) };
+          if (binds.id !== undefined) return { rows: structuredClone(pending.filter(row => row.id_entrega === binds.id)) };
           let selected = pending;
           for (const key of ['id_venta', 'id_sucursal', 'estado', 'departamento', 'municipio']) {
             if (binds[key] != null) selected = selected.filter(row => String(row[key]).toUpperCase() === String(binds[key]).toUpperCase());
@@ -46,7 +84,7 @@ async function setup(t, config = {}) {
         }
         throw new Error('SQL inesperado');
       },
-      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('ORA-99999 commit'); rows = pending; },
+      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('ORA-99999 commit'); rows = pending; audit = pendingAudit; },
       rollback: async () => { events.push('rollback'); },
       close: async () => events.push('close'),
     };
@@ -54,7 +92,7 @@ async function setup(t, config = {}) {
   const server = require('../src/app').createApp().listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  return { calls, events, rows: () => structuredClone(rows), request: async (method = 'GET', path = '', body, role = 'ENCARGADO', branch = 1) => {
+  return { audit: () => structuredClone(audit), calls, events, rows: () => structuredClone(rows), request: async (method = 'GET', path = '', body, role = 'ENCARGADO', branch = 1) => {
     const headers = { 'Content-Type': 'application/json' };
     if (role) headers.Authorization = `Bearer ${tokens.sign({ id_usuario: 1, id_rol: 1, nombre_rol: role, id_sucursal: branch })}`;
     const response = await fetch(`http://127.0.0.1:${server.address().port}/api/entregas${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });

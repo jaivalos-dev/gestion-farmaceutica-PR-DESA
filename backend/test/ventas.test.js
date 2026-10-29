@@ -6,8 +6,44 @@ const tokens = require('../src/shared/tokens');
 
 const input = { forma_pago: 'EFECTIVO', detalles: [{ id_medicamento: 3, cantidad: 2 }, { id_medicamento: 4, cantidad: 1 }] };
 
+for (const confirming of [false, true]) {
+  test(`CU-14 venta ${confirming ? 'confirmar' : 'crear'} registra un evento sin duplicar caja/inventario`, async t => {
+    const api = await setup(t);
+    const result = await api.request('POST', confirming ? '/7/confirmar' : '', confirming ? undefined : input);
+    assert.equal(result.status, confirming ? 200 : 201);
+    assert.equal(api.audit().length, 1);
+    const event = api.audit()[0];
+    assert.deepEqual([event.modulo, event.accion, event.entidad, event.id_entidad, event.id_usuario, event.id_sucursal],
+      ['VENTAS', confirming ? 'CONFIRMAR' : 'CREAR', 'VENTA', 7, 42, 1]);
+    if (confirming) {
+      assert.match(event.descripcion, /0\.40/);
+      assert.equal(api.state().movements.length, 2);
+      assert.equal(api.state().cash.length, 1);
+      assert.equal(api.state().sale.estado, 'CONFIRMADA');
+    }
+    assert.equal(api.acquisitions(), 1);
+    assert.deepEqual(api.events, ['commit', 'close']);
+  });
+  test(`CU-14 fallo auditoría revierte venta ${confirming ? 'confirmada con stock y caja' : 'creada con detalles'}`, async t => {
+    const api = await setup(t, { fail: /INSERT INTO AUDITORIA\b/ });
+    const before = api.state();
+    const result = await api.request('POST', confirming ? '/7/confirmar' : '', confirming ? undefined : input);
+    assert.equal(result.status, 500);
+    assert.deepEqual(api.state(), before);
+    assert.deepEqual(api.audit(), []);
+    assert.equal(api.acquisitions(), 1);
+    assert.deepEqual(api.events, ['rollback', 'close']);
+    if (confirming) {
+      for (const pattern of [/UPDATE INVENTARIO/, /INSERT INTO MOVIMIENTO_INVENTARIO/, /INSERT INTO MOVIMIENTO_CAJA/, /UPDATE VENTA/]) {
+        assert.ok(api.calls.some(call => pattern.test(call.sql)));
+      }
+    }
+  });
+}
+
 // Solo se sustituye el driver; rutas, servicios, repositories y transacciones son reales.
 async function setup(t, config = {}) {
+  let audit = [];
   process.env.JWT_SECRET = randomBytes(32).toString('hex');
   let state = {
     sale: config.missingSale ? null : { id_venta: 7, id_sucursal: 1, id_usuario: 10, fecha: '2026-10-27', forma_pago: 'EFECTIVO', estado: config.state || 'CREADA', total: config.total ?? 0.4 },
@@ -22,11 +58,13 @@ async function setup(t, config = {}) {
   t.mock.method(pool, 'getConnection', async () => {
     acquisitions++;
     const pending = structuredClone(state);
+    const pendingAudit = structuredClone(audit);
     let updates = 0, movements = 0;
     return {
       execute: async (sql, binds, options) => {
         calls.push({ sql, binds, options });
         if (config.fail?.test(sql)) throw new Error('ORA-99999 SQL privado');
+        if (/INSERT INTO AUDITORIA\b/.test(sql)) { pendingAudit.push({ ...binds }); return { rowsAffected: 1 }; }
         if (/^SELECT/.test(sql.trim())) {
           if (/FROM SUCURSAL/.test(sql)) return { rows: config.missingBranch ? [] : [{ activa: config.inactiveBranch ? 'N' : 'S' }] };
           if (/FROM MEDICAMENTO/.test(sql)) return { rows: binds.id === config.missingMedicine ? [] : [{ id_medicamento: binds.id, activo: binds.id === config.inactiveMedicine ? 'N' : 'S', precio: prices[binds.id] }] };
@@ -54,7 +92,7 @@ async function setup(t, config = {}) {
         if (/UPDATE VENTA/.test(sql)) { pending.sale.estado = binds.estado; return { rowsAffected: config.zeroSale ? 0 : 1 }; }
         throw new Error(`SQL no simulado: ${sql}`);
       },
-      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('commit failed'); state = pending; },
+      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('commit failed'); state = pending; audit = pendingAudit; },
       rollback: async () => { events.push('rollback'); if (config.failRollback) throw new Error('rollback failed'); },
       close: async () => events.push('close'),
     };
@@ -62,7 +100,7 @@ async function setup(t, config = {}) {
   const server = require('../src/app').createApp().listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  return { calls, events, state: () => structuredClone(state), acquisitions: () => acquisitions,
+  return { audit: () => structuredClone(audit), calls, events, state: () => structuredClone(state), acquisitions: () => acquisitions,
     setPrice: (id, value) => { prices[id] = value; },
     setStock: (id, value) => { state.inventories[id].existencia = value; },
     request: async (method = 'GET', path = '', body, branch = 1, role = 'ENCARGADO') => {

@@ -73,11 +73,23 @@ test('CU-14 combina filtros y usa intervalo inclusivo de días sin TRUNC sobre c
 for (const query of ['id_usuario=0', 'id_sucursal=-1', 'id_entidad=10000000000', 'id_usuario=1.5',
   'id_usuario=1&id_usuario=2', 'fecha_desde=2023-02-29', 'fecha_hasta=2026-04-31',
   'fecha_desde=0000-01-01', 'fecha_hasta=2026-10-29T12:00:00Z',
-  'fecha_desde=2026-10-30&fecha_hasta=2026-10-29', 'modulo=VENTAS', 'accion=LOGIN_OK',
-  'entidad=USUARIO', 'otro=1', 'modulo=%27%20OR%201%3D1--']) test(`CU-14 rechaza filtro inválido ${query}`, async t => {
+  'fecha_desde=2026-10-30&fecha_hasta=2026-10-29', 'modulo=DESCONOCIDO', 'accion=LOGIN_FALLIDO',
+  'entidad=DESCONOCIDA', 'otro=1', 'modulo=%27%20OR%201%3D1--']) test(`CU-14 rechaza filtro inválido ${query}`, async t => {
   const api = await setup(t);
   assert.equal((await api.request(`?${query}`)).status, 400);
   assert.deepEqual(api.events, []);
+});
+
+for (const [modulo, accion, entidad] of [
+  ['TRANSFERENCIAS', 'CAMBIO_ESTADO', 'TRANSFERENCIA'], ['VENTAS', 'CONFIRMAR', 'VENTA'],
+  ['CAJA', 'REGISTRAR', 'MOVIMIENTO_CAJA'], ['ACTIVOS', 'MODIFICAR', 'ACTIVO_FIJO'],
+  ['PLANILLA', 'REGISTRAR', 'GASTO_PLANILLA'], ['ENTREGAS', 'CAMBIO_ESTADO', 'ENTREGA'],
+  ['AUTH', 'LOGIN_OK', 'USUARIO'],
+]) test(`CU-14 consulta los eventos nuevos de ${modulo}`, async t => {
+  const api = await setup(t);
+  const result = await api.request(`?${new URLSearchParams({ modulo, accion, entidad })}`);
+  assert.equal(result.status, 200);
+  assert.deepEqual([api.calls[0].binds.modulo, api.calls[0].binds.accion, api.calls[0].binds.entidad], [modulo, accion, entidad]);
 });
 
 for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) test(`CU-14 no expone ${method}`, async t => {

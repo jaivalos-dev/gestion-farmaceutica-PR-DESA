@@ -1,3 +1,4 @@
+const auditoria = require('../auditoria/auditoria.service');
 const repository = require('./entregas.repository');
 const sales = require('../ventas/ventas.repository');
 const branches = require('../sucursales/sucursales.repository');
@@ -124,7 +125,11 @@ async function create(input, user) {
       if (error.errorNum === 1 && /\bUQ_ENTREGA_VENTA\b/i.test(error.message)) throw duplicateDelivery();
       throw error;
     }
-    // AUDITORIA transversal pendiente. ENTREGA nunca modifica stock ni caja.
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: sale.id_sucursal,
+      modulo: 'ENTREGAS', accion: 'CREAR', entidad: 'ENTREGA', id_entidad: id,
+      descripcion: `Entrega ${id} creada; venta ${data.id_venta}`,
+    });
     return requireFound(await repository.findById(connection, id));
   });
 }
@@ -146,7 +151,12 @@ async function transition(id, input, user) {
     if (await repository.setState(connection, id, estado) !== 1) {
       throw new AppError(409, 'ENTREGA_CONFLICT', 'La entrega cambió; vuelva a consultar');
     }
-    // Cancelar logística no anula la venta ni revierte inventario. Auditoría transversal pendiente.
+    // Cancelar logística no anula la venta ni revierte inventario.
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: row.id_sucursal,
+      modulo: 'ENTREGAS', accion: 'CAMBIO_ESTADO', entidad: 'ENTREGA', id_entidad: id,
+      descripcion: `Entrega ${id}: ${row.estado} -> ${estado}`,
+    });
     return requireFound(await repository.findById(connection, id));
   });
 }

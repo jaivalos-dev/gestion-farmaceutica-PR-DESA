@@ -6,8 +6,41 @@ const pool = require('../src/database/pool');
 
 const input = { id_sucursal_origen: 1, id_sucursal_destino: 2, observacion: "Traslado ' autorizado", detalles: [{ id_medicamento: 3, cantidad: 5 }] };
 
+for (const [action, state, next, branch] of [
+  ['', 'SOLICITADA', 'SOLICITADA', 1], ['preparar', 'SOLICITADA', 'PREPARADA', 1],
+  ['despachar', 'PREPARADA', 'DESPACHADA', 1], ['recibir', 'DESPACHADA', 'RECIBIDA', 2],
+  ['cancelar', 'SOLICITADA', 'CANCELADA', 1],
+]) {
+  test(`CU-14 transferencia ${action || 'crear'} produce un evento del actor actual`, async t => {
+    const api = await setup(t, { state });
+    const result = await api.request('POST', action ? `/7/${action}` : '', action ? undefined : { ...input, observacion: 'password token Authorization privado' }, branch);
+    assert.equal(result.status, action ? 200 : 201);
+    assert.equal(api.audit().length, 1);
+    const event = api.audit()[0];
+    assert.deepEqual([event.modulo, event.accion, event.entidad, event.id_entidad, event.id_usuario, event.id_sucursal],
+      ['TRANSFERENCIAS', action ? 'CAMBIO_ESTADO' : 'CREAR', 'TRANSFERENCIA', 7, 42, branch]);
+    if (action) assert.ok(event.descripcion.includes(`${state} -> ${next}`));
+    assert.doesNotMatch(event.descripcion, /password|token|Authorization|privado/);
+    assert.equal(api.acquisitions(), 1);
+    assert.deepEqual(api.events, ['commit', 'close']);
+    assert.equal(api.state().movements.length, ['despachar', 'recibir'].includes(action) ? 1 : 0);
+  });
+  test(`CU-14 fallo auditoría revierte transferencia ${action || 'crear'} y efectos`, async t => {
+    const api = await setup(t, { state, fail: /INSERT INTO AUDITORIA\b/ });
+    const before = api.state();
+    const result = await api.request('POST', action ? `/7/${action}` : '', action ? undefined : input, branch);
+    assert.equal(result.status, 500);
+    assert.deepEqual(api.state(), before);
+    assert.deepEqual(api.audit(), []);
+    assert.equal(api.acquisitions(), 1);
+    assert.deepEqual(api.events, ['rollback', 'close']);
+    if (['despachar', 'recibir'].includes(action)) assert.ok(api.calls.some(call => /UPDATE INVENTARIO/.test(call.sql)));
+  });
+}
+
 // Simula únicamente el driver: las cuatro capas y los límites transaccionales son reales.
 async function setup(t, config = {}) {
+  let audit = [];
   process.env.JWT_SECRET = randomBytes(32).toString('hex');
   let state = {
     transfer: config.missing ? null : { id_transferencia: 7, id_sucursal_origen: 1, id_sucursal_destino: 2, id_usuario: 10, fecha: '2026-10-27', estado: config.state || 'SOLICITADA', observacion: null, origen: 'Origen', destino: 'Destino', usuario: 'Creador' },
@@ -20,11 +53,13 @@ async function setup(t, config = {}) {
   t.mock.method(pool, 'getConnection', async () => {
     acquisitions++;
     const pending = structuredClone(state);
+    const pendingAudit = structuredClone(audit);
     let movementCount = 0;
     return {
       execute: async (sql, binds, options) => {
         calls.push({ sql, binds, options });
         if (config.fail?.test(sql)) throw new Error('ORA-99999 SQL privado');
+        if (/INSERT INTO AUDITORIA\b/.test(sql)) { pendingAudit.push({ ...binds }); return { rowsAffected: 1 }; }
         if (/^SELECT/.test(sql.trim())) {
           if (/FROM SUCURSAL/.test(sql)) return { rows: binds.id === config.missingBranch ? [] : [{ activa: binds.id === config.inactiveBranch ? 'N' : 'S' }] };
           if (/FROM MEDICAMENTO/.test(sql)) return { rows: binds.id === config.missingMedicine ? [] : [{ activo: binds.id === config.inactiveMedicine ? 'N' : 'S' }] };
@@ -55,7 +90,7 @@ async function setup(t, config = {}) {
         }
         throw new Error(`SQL no simulado: ${sql}`);
       },
-      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('commit failed'); state = pending; },
+      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('commit failed'); state = pending; audit = pendingAudit; },
       rollback: async () => { events.push('rollback'); if (config.failRollback) throw new Error('rollback failed'); },
       close: async () => events.push('close'),
     };
@@ -63,7 +98,7 @@ async function setup(t, config = {}) {
   const server = require('../src/app').createApp().listen(0, '127.0.0.1');
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
-  return { calls, events, state: () => structuredClone(state), acquisitions: () => acquisitions,
+  return { audit: () => structuredClone(audit), calls, events, state: () => structuredClone(state), acquisitions: () => acquisitions,
     setStock: (branch, medicine, stock) => { state.inventories[`${branch}:${medicine}`].existencia = stock; },
     request: async (method = 'GET', path = '', body, branch = 1, role = 'ENCARGADO') => {
       const headers = { 'Content-Type': 'application/json' };

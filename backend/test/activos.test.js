@@ -6,6 +6,40 @@ const pool = require('../src/database/pool');
 const tokens = require('../src/shared/tokens');
 
 const input = { id_sucursal: 1, categoria: 'Equipo', descripcion: 'Laptop administrativa', valor: 4500, estado: 'ACTIVO', responsable: 'Ana' };
+
+for (const [method, branch, estado] of [['POST', 1, 'ACTIVO'], ['PUT', 1, 'ACTIVO'], ['PUT', 2, 'ACTIVO'], ['PUT', 1, 'MANTENIMIENTO'], ['PUT', 1, 'BAJA']]) {
+  test(`CU-14 activo ${method} sucursal ${branch} estado ${estado} audita cambios seguros`, async t => {
+    const api = await setup(t);
+    const result = await api.request(method, method === 'POST' ? '' : '/1', { ...input, id_sucursal: branch, estado,
+      descripcion: 'password token Authorization privado', responsable: 'persona privada' });
+    assert.equal(result.status, method === 'POST' ? 201 : 200);
+    assert.equal(api.audit().length, 1);
+    const event = api.audit()[0];
+    assert.deepEqual([event.modulo, event.accion, event.entidad, event.id_entidad, event.id_usuario, event.id_sucursal],
+      ['ACTIVOS', method === 'POST' ? 'CREAR' : 'MODIFICAR', 'ACTIVO_FIJO', method === 'POST' ? 4 : 1, 42, branch]);
+    assert.doesNotMatch(event.descripcion, /password|token|Authorization|privado|persona privada/);
+    if (method === 'PUT') {
+      assert.ok(event.descripcion.includes(`sucursal 1 -> ${branch}`));
+      assert.ok(event.descripcion.includes(`ACTIVO -> ${estado}`));
+    }
+    assert.equal(api.acquisitions(), 1);
+    assert.deepEqual(api.events, ['commit', 'close']);
+  });
+}
+for (const method of ['POST', 'PUT']) test(`CU-14 activo ${method} revierte ante fallo auditoría`, async t => {
+  const api = await setup(t, { fail: /INSERT INTO AUDITORIA\b/ });
+  const before = api.state();
+  assert.equal((await api.request(method, method === 'POST' ? '' : '/1', { ...input, id_sucursal: 2, estado: 'BAJA' })).status, 500);
+  assert.deepEqual(api.state(), before);
+  assert.deepEqual(api.audit(), []);
+  assert.equal(api.acquisitions(), 1);
+  assert.deepEqual(api.events, ['rollback', 'close']);
+});
+test('CU-14 activo rechaza EN_MANTENIMIENTO sin evento', async t => {
+  const api = await setup(t);
+  assert.equal((await api.request('PUT', '/1', { ...input, estado: 'EN_MANTENIMIENTO' })).status, 400);
+  assert.deepEqual(api.audit(), []);
+});
 const fixtures = [
   { id_activo: 1, ...input, fecha_registro: '2026-10-01T08:00:00' },
   { id_activo: 2, id_sucursal: 2, categoria: 'Mobiliario', descripcion: 'Escritorio', valor: 0, estado: 'BAJA', responsable: null, fecha_registro: '2026-10-02T08:00:00' },
@@ -14,6 +48,7 @@ const fixtures = [
 
 // Solo Oracle se simula: las peticiones recorren JWT, rutas, servicios y repositories reales.
 async function setup(t, config = {}) {
+  let audit = [];
   process.env.JWT_SECRET = randomBytes(32).toString('hex');
   let state = structuredClone(fixtures);
   const calls = [], events = [];
@@ -22,11 +57,13 @@ async function setup(t, config = {}) {
   t.mock.method(pool, 'getConnection', async () => {
     acquisitions++;
     const pending = structuredClone(state);
+    const pendingAudit = structuredClone(audit);
     let written = false;
     return {
       execute: async (sql, binds, options) => {
         calls.push({ sql, binds, options });
         if (config.fail?.test(sql)) throw new Error('ORA-99999 SQL privado');
+        if (/INSERT INTO AUDITORIA\b/.test(sql)) { pendingAudit.push({ ...binds }); return { rowsAffected: 1 }; }
         if (/FROM SUCURSAL/.test(sql)) return { rows: binds.id === config.missingBranch ? [] : [{ id_sucursal: binds.id, activa: binds.id === config.inactiveBranch ? 'N' : 'S' }] };
         if (/INSERT INTO ACTIVO_FIJO/.test(sql)) {
           const { id, ...data } = binds;
@@ -54,7 +91,7 @@ async function setup(t, config = {}) {
         }
         throw new Error('SQL no simulado');
       },
-      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('ORA-99999 commit'); state = pending; },
+      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('ORA-99999 commit'); state = pending; audit = pendingAudit; },
       rollback: async () => { events.push('rollback'); if (config.failRollback) throw new Error('ORA-99999 rollback'); },
       close: async () => events.push('close'),
     };
@@ -63,7 +100,7 @@ async function setup(t, config = {}) {
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   return {
-    calls, events, acquisitions: () => acquisitions, state: () => structuredClone(state),
+    audit: () => structuredClone(audit), calls, events, acquisitions: () => acquisitions, state: () => structuredClone(state),
     request: async (method = 'GET', path = '', body, role = 'ADMINISTRADOR', branch = null) => {
       const headers = { 'Content-Type': 'application/json' };
       if (role) headers.Authorization = `Bearer ${tokens.sign({ id_usuario: 42, id_rol: 99, nombre_rol: role, id_sucursal: branch })}`;
@@ -216,7 +253,7 @@ test('CU-09 actualización modifica todos los campos permitidos sin cambiar iden
   assert.equal(update.options.autoCommit, false);
   assert.doesNotMatch(update.sql, /fecha_registro|SET id_activo/);
   assert.match(api.calls[0].sql, /FOR UPDATE/);
-  assert.equal(api.calls.some(call => /^INSERT|^DELETE/.test(call.sql)), false);
+  assert.equal(api.calls.some(call => /^INSERT INTO ACTIVO_FIJO\b|^DELETE/.test(call.sql)), false);
   for (const key of Object.keys(update.binds)) assert.match(update.sql, new RegExp(`:${key}\\b`));
 });
 
@@ -280,7 +317,7 @@ test('CU-09 SQL y comodines en textos permanecen en binds', async t => {
   }
   for (const [method, path] of [['POST', ''], ['PUT', '/1']]) {
     assert.equal((await api.request(method, path, { ...input, descripcion: value })).status, method === 'POST' ? 201 : 200);
-    const call = api.calls.findLast(call => /^(INSERT|UPDATE)/.test(call.sql));
+    const call = api.calls.findLast(call => /^(INSERT INTO|UPDATE) ACTIVO_FIJO\b/.test(call.sql));
     assert.equal(call.binds.descripcion, value);
     assert.equal(call.sql.includes(value), false);
   }

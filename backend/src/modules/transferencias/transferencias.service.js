@@ -1,3 +1,4 @@
+const auditoria = require('../auditoria/auditoria.service');
 const repository = require('./transferencias.repository');
 const inventory = require('../inventario/inventario.repository');
 const branches = require('../sucursales/sucursales.repository');
@@ -109,6 +110,11 @@ async function create(input, user) {
       id_usuario: user.id_usuario, estado: 'SOLICITADA', observacion: data.observacion,
     });
     for (const detail of data.detalles) await repository.createDetail(connection, id, detail);
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: data.id_sucursal_origen,
+      modulo: 'TRANSFERENCIAS', accion: 'CREAR', entidad: 'TRANSFERENCIA', id_entidad: id,
+      descripcion: `Transferencia ${id} creada; origen ${data.id_sucursal_origen}; destino ${data.id_sucursal_destino}`,
+    });
     return { ...await repository.findById(connection, id), detalles: await repository.details(connection, id) };
   });
 }
@@ -188,7 +194,11 @@ async function transition(id, action, user) {
     if (await repository.setState(connection, id, rule.to) !== 1) {
       throw new AppError(409, 'TRANSFERENCIA_CONFLICT', 'La transferencia cambió; vuelva a consultar');
     }
-    // AUDITORIA queda pendiente de la infraestructura transversal, como en Inventario.
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: receiving ? row.id_sucursal_destino : row.id_sucursal_origen,
+      modulo: 'TRANSFERENCIAS', accion: 'CAMBIO_ESTADO', entidad: 'TRANSFERENCIA', id_entidad: id,
+      descripcion: `Transferencia ${id}: ${row.estado} -> ${rule.to}; origen ${row.id_sucursal_origen}; destino ${row.id_sucursal_destino}`,
+    });
     return { ...row, estado: rule.to };
   });
 }
