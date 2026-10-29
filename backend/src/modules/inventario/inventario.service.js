@@ -1,6 +1,7 @@
 const repository = require('./inventario.repository');
 const sucursales = require('../sucursales/sucursales.repository');
 const medicamentos = require('../medicamentos/medicamentos.repository');
+const auditoria = require('../auditoria/auditoria.service');
 const database = require('../../database/connection');
 const AppError = require('../../shared/AppError');
 
@@ -102,7 +103,12 @@ async function adjust(input, user) {
       cantidad: data.cantidad, saldo_anterior, saldo_nuevo, referencia: data.referencia,
     };
     const id_movimiento = await repository.createMovement(connection, movement);
-    // AUDITORIA queda pendiente del servicio transversal; MOVIMIENTO_INVENTARIO es obligatorio.
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: data.id_sucursal,
+      modulo: 'INVENTARIO', accion: data.tipo_movimiento, entidad: 'INVENTARIO',
+      id_entidad: id_inventario,
+      descripcion: `Inventario ${id_inventario}: ${data.tipo_movimiento} de ${data.cantidad} unidades; saldo ${saldo_anterior} -> ${saldo_nuevo}; movimiento ${id_movimiento}`,
+    });
     return { id_movimiento, ...movement };
   });
 }

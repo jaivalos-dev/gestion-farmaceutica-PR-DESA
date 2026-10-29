@@ -1,4 +1,5 @@
 const repository = require('./sucursales.repository');
+const auditoria = require('../auditoria/auditoria.service');
 const database = require('../../database/connection');
 const AppError = require('../../shared/AppError');
 
@@ -50,26 +51,38 @@ async function getById(id) {
   return database.withConnection(async connection => requireFound(await repository.findById(connection, id)));
 }
 
-async function create(input) {
+async function create(input, actor) {
   const data = validateData(input, true);
   return database.withTransaction(async connection => {
     const id = await repository.create(connection, data);
-    return requireFound(await repository.findById(connection, id));
+    const result = requireFound(await repository.findById(connection, id));
+    await auditoria.registrarEvento(connection, {
+      id_usuario: actor.id_usuario, id_sucursal: id,
+      modulo: 'SUCURSALES', accion: 'CREAR', entidad: 'SUCURSAL',
+      id_entidad: id, descripcion: `Sucursal ${id} creada`,
+    });
+    return result;
   });
 }
 
-async function update(id, input) {
+async function update(id, input, actor) {
   const data = validateData(input);
   return database.withTransaction(async connection => {
     const rowsAffected = await repository.update(connection, id, data);
     if (rowsAffected === 0) {
       throw new AppError(404, 'SUCURSAL_NOT_FOUND', 'Sucursal inexistente');
     }
-    return requireFound(await repository.findById(connection, id));
+    const result = requireFound(await repository.findById(connection, id));
+    await auditoria.registrarEvento(connection, {
+      id_usuario: actor.id_usuario, id_sucursal: id,
+      modulo: 'SUCURSALES', accion: 'MODIFICAR', entidad: 'SUCURSAL',
+      id_entidad: id, descripcion: `Sucursal ${id} actualizada; activa=${result.activa}`,
+    });
+    return result;
   });
 }
 
-async function setState(id, input) {
+async function setState(id, input, actor) {
   validateObject(input, ['activa']);
   const activa = validateState(input.activa);
   return database.withTransaction(async connection => {
@@ -77,7 +90,13 @@ async function setState(id, input) {
     if (rowsAffected === 0) {
       throw new AppError(404, 'SUCURSAL_NOT_FOUND', 'Sucursal inexistente');
     }
-    return requireFound(await repository.findById(connection, id));
+    const result = requireFound(await repository.findById(connection, id));
+    await auditoria.registrarEvento(connection, {
+      id_usuario: actor.id_usuario, id_sucursal: id,
+      modulo: 'SUCURSALES', accion: 'MODIFICAR', entidad: 'SUCURSAL',
+      id_entidad: id, descripcion: `Sucursal ${id} actualizada; activa=${result.activa}`,
+    });
+    return result;
   });
 }
 

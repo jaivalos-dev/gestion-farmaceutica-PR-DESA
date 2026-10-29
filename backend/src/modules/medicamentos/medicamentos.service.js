@@ -1,4 +1,5 @@
 const repository = require('./medicamentos.repository');
+const auditoria = require('../auditoria/auditoria.service');
 const database = require('../../database/connection');
 const AppError = require('../../shared/AppError');
 
@@ -53,7 +54,7 @@ async function getById(id) {
   return database.withConnection(async connection => requireFound(await repository.findById(connection, id)));
 }
 
-async function create(input) {
+async function create(input, actor) {
   const data = validateData(input, true);
   return database.withTransaction(async connection => {
     let id;
@@ -62,11 +63,17 @@ async function create(input) {
     } catch (error) {
       throwWriteError(error);
     }
-    return requireFound(await repository.findById(connection, id));
+    const result = requireFound(await repository.findById(connection, id));
+    await auditoria.registrarEvento(connection, {
+      id_usuario: actor.id_usuario, id_sucursal: null,
+      modulo: 'MEDICAMENTOS', accion: 'CREAR', entidad: 'MEDICAMENTO',
+      id_entidad: id, descripcion: `Medicamento ${id} creado`,
+    });
+    return result;
   });
 }
 
-async function update(id, input) {
+async function update(id, input, actor) {
   const data = validateData(input);
   return database.withTransaction(async connection => {
     let rowsAffected;
@@ -78,11 +85,17 @@ async function update(id, input) {
     if (rowsAffected === 0) {
       throw new AppError(404, 'MEDICAMENTO_NOT_FOUND', 'Medicamento inexistente');
     }
-    return requireFound(await repository.findById(connection, id));
+    const result = requireFound(await repository.findById(connection, id));
+    await auditoria.registrarEvento(connection, {
+      id_usuario: actor.id_usuario, id_sucursal: null,
+      modulo: 'MEDICAMENTOS', accion: 'MODIFICAR', entidad: 'MEDICAMENTO',
+      id_entidad: id, descripcion: `Medicamento ${id} actualizado; activo=${result.activo}`,
+    });
+    return result;
   });
 }
 
-async function setState(id, input) {
+async function setState(id, input, actor) {
   validateObject(input, ['activo']);
   const activo = validateState(input.activo);
   return database.withTransaction(async connection => {
@@ -90,7 +103,13 @@ async function setState(id, input) {
     if (rowsAffected === 0) {
       throw new AppError(404, 'MEDICAMENTO_NOT_FOUND', 'Medicamento inexistente');
     }
-    return requireFound(await repository.findById(connection, id));
+    const result = requireFound(await repository.findById(connection, id));
+    await auditoria.registrarEvento(connection, {
+      id_usuario: actor.id_usuario, id_sucursal: null,
+      modulo: 'MEDICAMENTOS', accion: 'MODIFICAR', entidad: 'MEDICAMENTO',
+      id_entidad: id, descripcion: `Medicamento ${id} actualizado; activo=${result.activo}`,
+    });
+    return result;
   });
 }
 

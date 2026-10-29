@@ -17,17 +17,19 @@ async function setup(t, execute) {
     execute: async (sql, binds, options) => {
       calls.push({ sql, binds, options });
       if (execute) return execute(sql, binds, options);
-      if (/INSERT/.test(sql)) {
+      if (/INSERT INTO AUDITORIA\b/.test(sql)) return { rowsAffected: 1 };
+      if (/INSERT INTO MEDICAMENTO\b/.test(sql)) {
         const { id, ...fields } = binds;
         stored = { ...fields, id_medicamento: 7 };
         return { rowsAffected: 1, outBinds: { id: [7] } };
       }
-      if (/UPDATE/.test(sql)) {
+      if (/UPDATE MEDICAMENTO\b/.test(sql)) {
         const { id, ...fields } = binds;
         stored = { ...stored, ...fields };
         return { rowsAffected: 1 };
       }
-      return { rows: [stored] };
+      if (/FROM MEDICAMENTO\b/.test(sql)) return { rows: [stored] };
+      throw new Error('SQL no simulado');
     },
     commit: async () => events.push('commit'),
     rollback: async () => events.push('rollback'),
