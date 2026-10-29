@@ -1,3 +1,4 @@
+const auditoria = require('../auditoria/auditoria.service');
 const repository = require('./activos.repository');
 const branches = require('../sucursales/sucursales.repository');
 const database = require('../../database/connection');
@@ -98,7 +99,11 @@ async function create(input, user) {
   return database.withTransaction(async connection => {
     await requireActiveBranch(connection, data.id_sucursal);
     const id = await repository.create(connection, data);
-    // AUDITORIA transversal pendiente para altas y cambios, igual que en los módulos existentes.
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: data.id_sucursal,
+      modulo: 'ACTIVOS', accion: 'CREAR', entidad: 'ACTIVO_FIJO', id_entidad: id,
+      descripcion: `Activo ${id} creado; estado ${data.estado}`,
+    });
     return requireFound(await repository.findById(connection, id));
   });
 }
@@ -114,7 +119,11 @@ async function update(id, input, user) {
     if (await repository.update(connection, id, data) !== 1) {
       throw new AppError(409, 'ACTIVO_CONFLICT', 'El activo cambió; vuelva a consultar');
     }
-    // AUDITORIA transversal pendiente: reasignación, valor, responsable, estado y baja.
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: data.id_sucursal,
+      modulo: 'ACTIVOS', accion: 'MODIFICAR', entidad: 'ACTIVO_FIJO', id_entidad: id,
+      descripcion: `Activo ${id} actualizado; sucursal ${current.id_sucursal} -> ${data.id_sucursal}; estado ${current.estado} -> ${data.estado}`,
+    });
     return requireFound(await repository.findById(connection, id));
   });
 }

@@ -17,18 +17,18 @@ async function getById(req, res) {
 }
 
 async function create(req, res) {
-  const data = await service.create(req.body);
+  const data = await service.create(req.body, req.user);
   res.location(`/api/medicamentos/${data.id_medicamento}`).status(201)
     .json({ ok: true, data, message: 'Medicamento creado' });
 }
 
 async function update(req, res) {
-  const data = await service.update(parseId(req.params.id), req.body);
+  const data = await service.update(parseId(req.params.id), req.body, req.user);
   res.json({ ok: true, data, message: 'Medicamento actualizado' });
 }
 
 async function setState(req, res) {
-  const data = await service.setState(parseId(req.params.id), req.body);
+  const data = await service.setState(parseId(req.params.id), req.body, req.user);
   res.json({ ok: true, data, message: 'Estado actualizado' });
 }
 

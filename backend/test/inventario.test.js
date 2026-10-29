@@ -26,7 +26,9 @@ async function setup(t, config = {}) {
         }
         if (/INSERT INTO INVENTARIO/.test(sql)) return { rowsAffected: 1, outBinds: { id: [8] } };
         if (/INSERT INTO MOVIMIENTO_INVENTARIO/.test(sql)) return { rowsAffected: 1, outBinds: { id: [9] } };
-        return { rowsAffected: config.zeroUpdate ? 0 : 1 };
+        if (/INSERT INTO AUDITORIA\b/.test(sql)) return { rowsAffected: 1 };
+        if (/UPDATE INVENTARIO\b/.test(sql)) return { rowsAffected: config.zeroUpdate ? 0 : 1 };
+        throw new Error('SQL no simulado');
       },
       commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('commit failed'); },
       rollback: async () => { events.push('rollback'); if (config.failRollback) throw new Error('rollback failed'); },

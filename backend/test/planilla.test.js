@@ -6,6 +6,29 @@ const pool = require('../src/database/pool');
 const tokens = require('../src/shared/tokens');
 
 const input = { id_sucursal: 1, periodo: '2026-10', concepto: 'Gasto mensual de planilla', monto: 18500 };
+
+test('CU-14 planilla registra actor, periodo y monto sin concepto libre', async t => {
+  const api = await setup(t);
+  assert.equal((await api.request('POST', '/gastos', { ...input, concepto: 'password token Authorization privado' })).status, 201);
+  assert.equal(api.audit().length, 1);
+  const event = api.audit()[0];
+  assert.deepEqual([event.modulo, event.accion, event.entidad, event.id_entidad, event.id_usuario, event.id_sucursal],
+    ['PLANILLA', 'REGISTRAR', 'GASTO_PLANILLA', 5, 42, 1]);
+  assert.match(event.descripcion, /2026-10/);
+  assert.match(event.descripcion, /18500\.00/);
+  assert.doesNotMatch(event.descripcion, /password|token|Authorization|privado/);
+  assert.equal(api.acquisitions(), 1);
+  assert.deepEqual(api.events, ['commit', 'close']);
+});
+test('CU-14 planilla revierte si auditoría falla', async t => {
+  const api = await setup(t, { fail: /INSERT INTO AUDITORIA\b/ });
+  const before = api.state();
+  assert.equal((await api.request('POST', '/gastos', input)).status, 500);
+  assert.deepEqual(api.state(), before);
+  assert.deepEqual(api.audit(), []);
+  assert.equal(api.acquisitions(), 1);
+  assert.deepEqual(api.events, ['rollback', 'close']);
+});
 const fixtures = [
   { id_gasto: 1, id_sucursal: 1, id_usuario: 10, periodo: '2026-10', concepto: 'Planilla mensual', monto: 0.1, fecha_registro: '2026-10-01T08:00:00' },
   { id_gasto: 2, id_sucursal: 2, id_usuario: 11, periodo: '2026-10', concepto: 'Planilla mensual', monto: 0.2, fecha_registro: '2026-10-03T08:00:00' },
@@ -15,6 +38,7 @@ const fixtures = [
 
 // Solo se sustituye Oracle. JWT, HTTP, capas y manejo de transacciones son reales.
 async function setup(t, config = {}) {
+  let audit = [];
   process.env.JWT_SECRET = randomBytes(32).toString('hex');
   let state = structuredClone(fixtures);
   let acquisitions = 0;
@@ -23,11 +47,13 @@ async function setup(t, config = {}) {
   t.mock.method(pool, 'getConnection', async () => {
     acquisitions++;
     const pending = structuredClone(state);
+    const pendingAudit = structuredClone(audit);
     let written = false;
     return {
       execute: async (sql, binds, options) => {
         calls.push({ sql, binds, options });
         if (config.fail?.test(sql)) throw new Error('ORA-99999 SQL privado');
+        if (/INSERT INTO AUDITORIA\b/.test(sql)) { pendingAudit.push({ ...binds }); return { rowsAffected: 1 }; }
         if (/FROM SUCURSAL/.test(sql)) return { rows: config.missingBranch ? [] : [{ id_sucursal: binds.id, activa: config.inactiveBranch ? 'N' : 'S' }] };
         if (/INSERT INTO GASTO_PLANILLA/.test(sql)) {
           const { id, ...data } = binds;
@@ -59,7 +85,7 @@ async function setup(t, config = {}) {
         }
         throw new Error('SQL no simulado');
       },
-      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('ORA-99999 commit'); state = pending; },
+      commit: async () => { events.push('commit'); if (config.failCommit) throw new Error('ORA-99999 commit'); state = pending; audit = pendingAudit; },
       rollback: async () => { events.push('rollback'); if (config.failRollback) throw new Error('ORA-99999 rollback'); },
       close: async () => events.push('close'),
     };
@@ -68,7 +94,7 @@ async function setup(t, config = {}) {
   await new Promise(resolve => server.once('listening', resolve));
   t.after(() => new Promise(resolve => server.close(resolve)));
   return {
-    calls, events, acquisitions: () => acquisitions, state: () => structuredClone(state),
+    audit: () => structuredClone(audit), calls, events, acquisitions: () => acquisitions, state: () => structuredClone(state),
     request: async (method = 'GET', path = '/gastos', body, role = 'ADMINISTRADOR', branch = null) => {
       const headers = { 'Content-Type': 'application/json' };
       if (role) headers.Authorization = `Bearer ${tokens.sign({ id_usuario: 42, id_rol: 99, nombre_rol: role, id_sucursal: branch })}`;

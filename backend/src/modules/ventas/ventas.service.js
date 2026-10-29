@@ -1,3 +1,4 @@
+const auditoria = require('../auditoria/auditoria.service');
 const repository = require('./ventas.repository');
 const inventory = require('../inventario/inventario.repository');
 const branches = require('../sucursales/sucursales.repository');
@@ -131,6 +132,11 @@ async function create(input, user) {
       total: toAmount(totalCents), estado: 'CREADA',
     });
     for (const detail of details) await repository.createDetail(connection, id, detail);
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: branch,
+      modulo: 'VENTAS', accion: 'CREAR', entidad: 'VENTA', id_entidad: id,
+      descripcion: `Venta ${id} creada; total ${toAmount(totalCents).toFixed(2)}`,
+    });
     return { ...await repository.findById(connection, id), detalles: await repository.details(connection, id) };
   });
 }
@@ -191,7 +197,11 @@ async function confirm(id, user) {
     if (await repository.setState(connection, id, 'CONFIRMADA') !== 1) {
       throw new AppError(409, 'VENTA_CONFLICT', 'La venta cambió; vuelva a consultar');
     }
-    // AUDITORIA queda pendiente del servicio transversal, como en Inventario y Transferencias.
+    await auditoria.registrarEvento(connection, {
+      id_usuario: user.id_usuario, id_sucursal: row.id_sucursal,
+      modulo: 'VENTAS', accion: 'CONFIRMAR', entidad: 'VENTA', id_entidad: id,
+      descripcion: `Venta ${id} confirmada; total ${toAmount(total).toFixed(2)}`,
+    });
     return { ...row, estado: 'CONFIRMADA' };
   });
 }
