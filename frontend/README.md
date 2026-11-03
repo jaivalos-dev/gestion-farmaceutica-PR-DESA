@@ -1,6 +1,6 @@
 # Frontend administrativo
 
-Base académica React + Vite + JavaScript. Alcance: login, sesión JWT, inicio y consultas de sucursales y medicamentos. No contiene CRUD gráfico, dashboard ni reglas de negocio.
+Base académica React + Vite + JavaScript. Alcance: login, sesión JWT, inicio, consulta, alta y edición de sucursales y medicamentos con permisos visuales. No contiene dashboard ni reglas de negocio transaccionales.
 
 ## Ejecutar frontend y backend
 
@@ -67,7 +67,7 @@ La decodificación del JWT únicamente sirve a presentación y navegación. No v
 
 `src/auth/permissions.js` centraliza los permisos por operación. `hasPermission(user, permission)` se utiliza en rutas, menú e inicio; las acciones futuras deben consultar la misma fuente. ADMINISTRADOR no tiene privilegios implícitos. Los permisos desconocidos se deniegan. Las consultas de sucursales y medicamentos permiten cualquier usuario autenticado.
 
-Las rutas funcionales son `/login`, `/`, `/sucursales`, `/medicamentos` y `/403`. El menú conserva únicamente Inicio, Sucursales y Medicamentos. No hay enlaces a módulos pendientes.
+Las rutas funcionales son `/login`, `/`, `/sucursales`, `/medicamentos`, `/inventario` y `/403`. El menú muestra Inicio, Sucursales, Medicamentos e Inventario según permisos. No hay enlaces a módulos pendientes.
 
 `ProtectedRoute` admite `permission` o `roles`; si se especifican ambos, exige ambos. Sin sesión redirige a `/login`; sin autorización redirige a `/403` sin cerrar sesión. Sin restricciones adicionales conserva el acceso autenticado. `/403` solo requiere sesión y permite regresar a Inicio.
 
@@ -90,10 +90,34 @@ Las pruebas automáticas verifican JSON/Bearer, preservación de errores, expira
 2. Sin sesión, abrir /sucursales y /medicamentos: debe redirigir a /login.
 3. Ingresar credenciales incorrectas: mostrar el mensaje/code de la API sin guardar contraseña ni sesión.
 4. Iniciar sesión con una cuenta activa existente: mostrar Inicio, usuario/rol y navegación. Abrir /login con sesión debe redirigir a /.
-5. Abrir Sucursales y Medicamentos: verificar filas reales contra la API y los siete campos de cada catálogo. No existen botones de escritura.
+5. Abrir Sucursales y Medicamentos: verificar filas reales contra la API y los siete campos de cada catálogo. ADMINISTRADOR puede crear/editar ambos; ENCARGADO solo medicamentos; AUDITOR y DESPACHO solo consultan. Comprobar que Nuevo/Editar no aparezcan sin permiso.
 6. Recargar una ruta administrativa: conservar sesión y volver a consultar la API. Verificar cierre de sesión y posterior bloqueo de rutas, también en otra pestaña.
 7. Para comprobar 401, alterar solamente la firma del JWT guardado en DevTools, manteniendo su payload y exp; recargar y consultar un catálogo. La API debe rechazarlo y la aplicación debe borrar la sesión y volver a login.
 8. Detener temporalmente el backend en el entorno de prueba: mostrar error al consultar; reiniciarlo y usar Reintentar. La carga puede observarse con throttling de red de DevTools.
 9. Si una consulta devuelve un arreglo vacío, mostrar el mensaje sin datos. Si no hay una base vacía de prueba, simular esa respuesta exclusivamente en el navegador; no borrar registros Oracle para probarla.
+
+### Alta y edición de catálogos
+
+`CatalogManager` comparte el formulario embebido, mensajes y guardado mediante `useAuth().request`. `CatalogTable` conserva carga/error/lista vacía/reintento y añade acciones de edición opcionales. Después de guardar se vuelve a consultar el listado; un fallo de esa consulta muestra su propio error y permite reintentar sin repetir la escritura.
+
+Se utilizan `GET /api/sucursales`, `POST /api/sucursales`, `PUT /api/sucursales/:id` y sus equivalentes en `/api/medicamentos`. La edición parte de los campos completos recibidos en el listado. El estado se envía en el PUT (`activa` para sucursales, `activo` para medicamentos, valores S/N). No se utiliza DELETE ni se necesita una petición PATCH separada.
+
+Los campos de texto se recortan y validan como obligatorios, con los límites UTF-8 del contrato. El tipo de sucursal admite FARMACIA/STAND. El precio se envía como número finito, mayor o igual a cero y menor que 99999999.995; se admiten decimales adicionales y Oracle aplica el redondeo. Los mensajes/códigos de la API se muestran sin cerrar sesión ante 403; 401 conserva el manejo central existente.
+
+Para verificar manualmente: crear y editar un registro con un rol autorizado, cancelar sin guardar, cambiar estado, comprobar el listado actualizado y probar código de medicamento duplicado. Probar también precio cero, negativo y fuera de rango, y ausencia de controles con roles de consulta. Durante el guardado se bloquean los controles para evitar envíos repetidos. Estas operaciones deben hacerse con datos de demostración autorizados.
+
+`test/catalogForms.test.js` cubre transformación, texto obligatorio, límites UTF-8, enums, precio y decisiones de permisos. Las pruebas unitarias y el build no sustituyen la verificación de los formularios en navegador contra la API y Oracle.
+
+### Inventario
+
+`/inventario` permite consultar ID, sucursal, medicamento, código, existencia y fecha de actualización. Los filtros reciben IDs de sucursal y medicamento (consultables en los catálogos) y se envían como `id_sucursal` e `id_medicamento` a `GET /api/inventario`. Los filtros vacíos se omiten. ENCARGADO tiene su sucursal fijada; la API sigue aplicando el alcance. ADMINISTRADOR y ENCARGADO pueden ajustar, AUDITOR solo consulta y DESPACHO no tiene acceso ni enlaces.
+
+El formulario envía `POST /api/inventario/ajustes` con IDs numéricos, `tipo_movimiento`, `cantidad` entera positiva de hasta 10 dígitos y `referencia` obligatoria de hasta 100 bytes UTF-8. ENTRADA y AJUSTE incrementan existencia; SALIDA descuenta. AJUSTE no representa un saldo absoluto ni admite cantidad negativa. Solo ENTRADA puede crear un inventario inexistente. No se realizan modificaciones directas de existencia desde React.
+
+Durante el guardado se bloquea el envío repetido. Tras éxito se informa el nuevo saldo y se consulta nuevamente el listado con los filtros aplicados. Si falla esta consulta se conserva la confirmación y se ofrece reintentar solo la lectura. Cancelar cierra el formulario sin enviar. Los errores de stock, catálogos inactivos y alcance se muestran desde la API; 403 conserva sesión y 401 utiliza el manejo central.
+
+Pruebas manuales contra Oracle: verificar consulta con ambos filtros; acceso y controles de los cuatro roles; sucursal fija de ENCARGADO; entrada, salida y ajuste sobre datos de demostración; rechazo de salida superior a existencia; referencia vacía y cantidad inválida; cancelación; doble clic al guardar; recarga y coincidencia del nuevo saldo. Verificar que cada operación exitosa produzca un único movimiento y su auditoría mediante los mecanismos de consulta existentes. Comprobar caída de API y reintento, y acceso directo de DESPACHO a `/inventario` (debe ir a `/403`).
+
+`test/inventario.test.js` verifica permisos, filtros, transformación/validación, secuencia POST/GET, liberación del bloqueo tras error, doble envío y fallo de recarga tras una escritura confirmada. No sustituye una prueba de interacción en navegador.
 
 No se modificaron backend, database, docs ni AGENTS.md. No se realizó commit.

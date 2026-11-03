@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 
-export default function CatalogTable({ endpoint, title, columns, idField }) {
+export default function CatalogTable({ endpoint, title, columns, idField, onEdit, actionsDisabled = false }) {
   const { request } = useAuth()
   const [result, setResult] = useState({ loading: true, data: [], error: null })
   const [attempt, setAttempt] = useState(0)
@@ -36,9 +36,10 @@ export default function CatalogTable({ endpoint, title, columns, idField }) {
   return <div className="table-responsive" tabIndex={0} role="region" aria-label={`Listado de ${title.toLowerCase()}`}>
     <table className="table table-bordered table-hover align-middle caption-top mb-0">
       <caption>Listado de {title.toLowerCase()}</caption>
-      <thead className="table-light"><tr>{columns.map(([field, label]) => <th key={field} scope="col">{label}</th>)}</tr></thead>
+      <thead className="table-light"><tr>{columns.map(([field, label]) => <th key={field} scope="col">{label}</th>)}{onEdit && <th scope="col">Acciones</th>}</tr></thead>
       <tbody>{result.data.map(row => <tr key={row[idField]}>
         {columns.map(([field, , format]) => <td key={field}>{row[field] == null ? '—' : format ? format(row[field]) : row[field]}</td>)}
+        {onEdit && <td><button type="button" className="btn btn-outline-primary btn-sm" disabled={actionsDisabled} onClick={() => onEdit(row)} aria-label={`Editar ${row.nombre ?? row[idField]}`}>Editar</button></td>}
       </tr>)}</tbody>
     </table>
   </div>

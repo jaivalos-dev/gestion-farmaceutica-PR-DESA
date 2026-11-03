@@ -11,6 +11,7 @@ export default function HomePage() {
     <div className="d-flex flex-wrap gap-2 mt-4">
       {hasPermission(session.user, 'sucursales.read') && <Link className="btn btn-primary" to="/sucursales">Consultar sucursales</Link>}
       {hasPermission(session.user, 'medicamentos.read') && <Link className="btn btn-outline-primary" to="/medicamentos">Consultar medicamentos</Link>}
+      {hasPermission(session.user, 'inventario.read') && <Link className="btn btn-outline-primary" to="/inventario">Consultar inventario</Link>}
     </div>
   </>
 }

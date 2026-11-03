@@ -13,6 +13,7 @@ export default function AdminLayout() {
           <NavLink className="nav-link" to="/" end>Inicio</NavLink>
           {hasPermission(user, 'sucursales.read') && <NavLink className="nav-link" to="/sucursales">Sucursales</NavLink>}
           {hasPermission(user, 'medicamentos.read') && <NavLink className="nav-link" to="/medicamentos">Medicamentos</NavLink>}
+          {hasPermission(user, 'inventario.read') && <NavLink className="nav-link" to="/inventario">Inventario</NavLink>}
         </nav>
         <div className="d-flex align-items-center gap-4 ms-auto">
           <span className="small text-white text-end">Usuario {user.id_usuario} · {user.nombre_rol}{user.id_sucursal != null && <><br />Sucursal {user.id_sucursal}</>}</span>
