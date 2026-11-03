@@ -1,3 +1,4 @@
+const { startTestServer } = require('../test-support/testServer');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
@@ -35,8 +36,7 @@ async function setup(t, config = {}) {
       close: async () => events.push('close'),
     };
   });
-  const server = require('../src/app').createApp().listen(0, '127.0.0.1');
-  await new Promise(resolve => server.once('listening', resolve));
+  const server = await startTestServer();
   t.after(() => new Promise(resolve => server.close(resolve)));
   return { calls, events, acquisitions: () => acquisitions, request: async (method = 'GET', path = '', body, role = 'ADMINISTRADOR', branch = 2) => {
     const headers = { 'Content-Type': 'application/json' };
