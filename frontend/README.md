@@ -63,6 +63,18 @@ La decodificación del JWT únicamente sirve a presentación y navegación. No v
 
 ## Verificaciones
 
+### Permisos visuales y navegación
+
+`src/auth/permissions.js` centraliza los permisos por operación. `hasPermission(user, permission)` se utiliza en rutas, menú e inicio; las acciones futuras deben consultar la misma fuente. ADMINISTRADOR no tiene privilegios implícitos. Los permisos desconocidos se deniegan. Las consultas de sucursales y medicamentos permiten cualquier usuario autenticado.
+
+Las rutas funcionales son `/login`, `/`, `/sucursales`, `/medicamentos` y `/403`. El menú conserva únicamente Inicio, Sucursales y Medicamentos. No hay enlaces a módulos pendientes.
+
+`ProtectedRoute` admite `permission` o `roles`; si se especifican ambos, exige ambos. Sin sesión redirige a `/login`; sin autorización redirige a `/403` sin cerrar sesión. Sin restricciones adicionales conserva el acceso autenticado. `/403` solo requiere sesión y permite regresar a Inicio.
+
+Para incorporar una operación se reutiliza su clave central, por ejemplo `ventas.read`, `inventario.adjust` o `entregas.changeState`. Los permisos solo controlan presentación: el backend sigue validando autorización, sucursal y reglas de negocio.
+
+Las pruebas de permisos cubren lectura y escritura para los cuatro roles. `test/routeAccess.test.js` prueba la decisión de acceso que utiliza `ProtectedRoute`, sin incorporar herramientas de renderizado JSX ni dependencias nuevas; no sustituye una prueba de navegación en navegador.
+
 ```powershell
 npm.cmd test
 npm.cmd run lint
