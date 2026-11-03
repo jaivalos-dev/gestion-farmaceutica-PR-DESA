@@ -1,3 +1,4 @@
+const { startTestServer } = require('../test-support/testServer');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -13,13 +14,11 @@ async function requestHealth(t, connection) {
   }));
   const database = require('../src/database/pool');
   await database.initializePool({});
-  const { createApp } = require('../src/app');
-  const server = createApp().listen(0, '127.0.0.1');
+  const server = await startTestServer();
   t.after(async () => {
     await new Promise((resolve) => server.close(resolve));
     await database.closePool();
   });
-  await new Promise((resolve) => server.once('listening', resolve));
   return fetch(`http://127.0.0.1:${server.address().port}/api/health`);
 }
 

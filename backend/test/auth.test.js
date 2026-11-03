@@ -1,3 +1,4 @@
+const { startTestServer } = require('../test-support/testServer');
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
@@ -46,9 +47,7 @@ async function setup(t, user, failure, config = {}) {
     close: async () => { closed = true; events.push(`close:${number}`); },
   };
   });
-  const { createApp } = require('../src/app');
-  const server = createApp().listen(0, '127.0.0.1');
-  await new Promise(resolve => server.once('listening', resolve));
+  const server = await startTestServer();
   t.after(() => new Promise(resolve => server.close(resolve)));
   return {
     events, audit, acquisitions: () => acquisitions,
@@ -191,8 +190,7 @@ test('Bearer y autorización por rol protegen una ruta HTTP', async t => {
   app.get('/denied', authenticate, authorizeRoles(1), (req, res) => res.sendStatus(200));
   app.get('/no-auth', authorizeRoles(2), (req, res) => res.sendStatus(200));
   app.use(require('../src/middlewares/errorHandler'));
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise(resolve => server.once('listening', resolve));
+  const server = await startTestServer(app);
   t.after(() => new Promise(resolve => server.close(resolve)));
   const request = (path, token) => fetch(`http://127.0.0.1:${server.address().port}${path}`, {
     headers: token ? { Authorization: token } : {},
