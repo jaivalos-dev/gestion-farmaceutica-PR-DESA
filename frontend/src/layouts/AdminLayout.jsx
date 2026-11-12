@@ -11,9 +11,18 @@ export default function AdminLayout() {
         <strong className="navbar-brand system-name m-0">Sistema Integral de Gestión Farmacéutica</strong>
         <nav className="navbar-nav flex-row flex-wrap gap-3" aria-label="Navegación principal">
           <NavLink className="nav-link" to="/" end>Inicio</NavLink>
+          {hasPermission(user, 'dashboard.read') && <NavLink className="nav-link" to="/dashboard">Dashboard</NavLink>}
           {hasPermission(user, 'sucursales.read') && <NavLink className="nav-link" to="/sucursales">Sucursales</NavLink>}
           {hasPermission(user, 'medicamentos.read') && <NavLink className="nav-link" to="/medicamentos">Medicamentos</NavLink>}
           {hasPermission(user, 'inventario.read') && <NavLink className="nav-link" to="/inventario">Inventario</NavLink>}
+          {hasPermission(user, 'transferencias.read') && <NavLink className="nav-link" to="/transferencias">Transferencias</NavLink>}
+          {hasPermission(user, 'ventas.read') && <NavLink className="nav-link" to="/ventas">Ventas</NavLink>}
+          {hasPermission(user, 'caja.read') && <NavLink className="nav-link" to="/caja">Caja</NavLink>}
+          {hasPermission(user, 'activos.read') && <NavLink className="nav-link" to="/activos">Activos fijos</NavLink>}
+          {hasPermission(user, 'planilla.read') && <NavLink className="nav-link" to="/planilla">Planilla</NavLink>}
+          {hasPermission(user, 'entregas.read') && <NavLink className="nav-link" to="/entregas">Entregas</NavLink>}
+          {hasPermission(user, 'disponibilidad.read') && <NavLink className="nav-link" to="/disponibilidad">Disponibilidad</NavLink>}
+          {hasPermission(user, 'auditoria.read') && <NavLink className="nav-link" to="/auditoria">Auditoría</NavLink>}
         </nav>
         <div className="d-flex align-items-center gap-4 ms-auto">
           <span className="small text-white text-end">Usuario {user.id_usuario} · {user.nombre_rol}{user.id_sucursal != null && <><br />Sucursal {user.id_sucursal}</>}</span>

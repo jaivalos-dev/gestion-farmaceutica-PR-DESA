@@ -13,6 +13,7 @@ const planillaRoutes = require('./modules/planilla/planilla.routes');
 const disponibilidadRoutes = require('./modules/disponibilidad/disponibilidad.routes');
 const entregasRoutes = require('./modules/entregas/entregas.routes');
 const auditoriaRoutes = require('./modules/auditoria/auditoria.routes');
+const dashboardRoutes = require('./modules/dashboard/dashboard.routes');
 const errorHandler = require('./middlewares/errorHandler');
 const AppError = require('./shared/AppError');
 
@@ -35,6 +36,7 @@ function createApp() {
   app.use('/api/disponibilidad', disponibilidadRoutes);
   app.use('/api/entregas', entregasRoutes);
   app.use('/api/auditoria', auditoriaRoutes);
+  app.use('/api/dashboard', dashboardRoutes);
   app.use((req, res, next) => next(new AppError(404, 'NOT_FOUND', 'Ruta no encontrada')));
   app.use(errorHandler);
   return app;

@@ -22,6 +22,7 @@ export const permissions = {
   'entregas.changeState': ['ENCARGADO', 'DESPACHO'],
   'disponibilidad.read': ['ADMINISTRADOR', 'ENCARGADO', 'DESPACHO'],
   'auditoria.read': ['ADMINISTRADOR', 'AUDITOR'],
+  'dashboard.read': ['ADMINISTRADOR', 'AUDITOR'],
 }
 
 export function hasRole(user, roles) {

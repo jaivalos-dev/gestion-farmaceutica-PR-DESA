@@ -1,6 +1,6 @@
 # Frontend administrativo
 
-Base académica React + Vite + JavaScript. Alcance: login, sesión JWT, inicio, consulta, alta y edición de sucursales y medicamentos con permisos visuales. No contiene dashboard ni reglas de negocio transaccionales.
+Base académica React + Vite + JavaScript. Alcance: login, sesión JWT, inicio, consulta, alta y edición de sucursales y medicamentos con permisos visuales. Incluye el [dashboard de resumen ejecutivo](src/modules/dashboard/README.md) en `/dashboard` para ADMINISTRADOR y AUDITOR mediante `dashboard.read`. Las reglas de negocio transaccionales permanecen en el backend.
 
 ## Ejecutar frontend y backend
 
@@ -67,7 +67,7 @@ La decodificación del JWT únicamente sirve a presentación y navegación. No v
 
 `src/auth/permissions.js` centraliza los permisos por operación. `hasPermission(user, permission)` se utiliza en rutas, menú e inicio; las acciones futuras deben consultar la misma fuente. ADMINISTRADOR no tiene privilegios implícitos. Los permisos desconocidos se deniegan. Las consultas de sucursales y medicamentos permiten cualquier usuario autenticado.
 
-Las rutas funcionales son `/login`, `/`, `/sucursales`, `/medicamentos`, `/inventario` y `/403`. El menú muestra Inicio, Sucursales, Medicamentos e Inventario según permisos. No hay enlaces a módulos pendientes.
+Las rutas funcionales son `/login`, `/`, `/sucursales`, `/medicamentos`, `/inventario`, `/transferencias` y `/403`. El menú muestra Inicio, Sucursales, Medicamentos, Inventario y Transferencias según permisos. No hay enlaces a módulos pendientes.
 
 `ProtectedRoute` admite `permission` o `roles`; si se especifican ambos, exige ambos. Sin sesión redirige a `/login`; sin autorización redirige a `/403` sin cerrar sesión. Sin restricciones adicionales conserva el acceso autenticado. `/403` solo requiere sesión y permite regresar a Inicio.
 
@@ -119,5 +119,21 @@ Durante el guardado se bloquea el envío repetido. Tras éxito se informa el nue
 Pruebas manuales contra Oracle: verificar consulta con ambos filtros; acceso y controles de los cuatro roles; sucursal fija de ENCARGADO; entrada, salida y ajuste sobre datos de demostración; rechazo de salida superior a existencia; referencia vacía y cantidad inválida; cancelación; doble clic al guardar; recarga y coincidencia del nuevo saldo. Verificar que cada operación exitosa produzca un único movimiento y su auditoría mediante los mecanismos de consulta existentes. Comprobar caída de API y reintento, y acceso directo de DESPACHO a `/inventario` (debe ir a `/403`).
 
 `test/inventario.test.js` verifica permisos, filtros, transformación/validación, secuencia POST/GET, liberación del bloqueo tras error, doble envío y fallo de recarga tras una escritura confirmada. No sustituye una prueba de interacción en navegador.
+
+### Transferencias
+
+`/transferencias` utiliza `transferencias.read` y `transferencias.act`, actualmente exclusivos de ENCARGADO. ADMINISTRADOR no tiene acceso implícito. La API limita listado y detalle a transferencias donde la sucursal asignada sea origen o destino.
+
+Se consumen `GET /api/transferencias` (filtros opcionales `estado`, `id_sucursal_origen`, `id_sucursal_destino`), `GET /api/transferencias/:id`, `POST /api/transferencias` y los POST sin cuerpo `/:id/preparar`, `/:id/despachar`, `/:id/recibir`, `/:id/cancelar`. El formulario consulta `GET /api/sucursales` y `GET /api/medicamentos` para ofrecer catálogos activos. El origen queda fijo a la sucursal del usuario y el destino debe ser diferente. Observación es opcional (250 bytes UTF-8); cada detalle envía un ID y cantidad entera positiva de hasta 10 dígitos.
+
+El flujo es SOLICITADA → PREPARADA → DESPACHADA → RECIBIDA. Origen prepara y despacha; destino recibe. Origen puede cancelar únicamente SOLICITADA o PREPARADA. RECIBIDA y CANCELADA son terminales. Los botones reflejan estas reglas, pero el backend vuelve a validar estados, sucursal, catálogos activos y stock. Preparar valida existencia sin descontarla; despachar y recibir afectan inventario exclusivamente en el backend.
+
+El backend permite detalles repetidos y procesa sus cantidades acumuladas al comprobar stock, sin consolidar las filas. El formulario evita duplicados accidentales mediante una sola fila por medicamento. No se cambia el contrato del backend.
+
+Las escrituras bloquean el doble envío y recargan el listado conservando filtros. Si falla la recarga se conserva la confirmación de escritura y se ofrece reintentar solo la consulta. Los errores de API muestran mensaje/código y liberan los controles. Cancelar formulario no envía ninguna petición de escritura.
+
+Verificación manual pendiente contra Oracle: crear una transferencia con varios medicamentos activos; revisar detalle; preparar y despachar como origen; iniciar sesión como destino y recibir; comprobar que cada efecto en inventario ocurre una sola vez. Probar cancelación desde ambos estados permitidos, stock insuficiente, catálogo desactivado después de crear, cantidades inválidas, filtros, doble clic y recuperación tras error. Con ADMINISTRADOR/AUDITOR/DESPACHO comprobar ausencia del enlace y redirección de acceso directo a `/403`.
+
+`test/transferencias.test.js` verifica permisos, estados/sucursales, filtros, payload, validaciones, errores de API, recarga y bloqueo compartido de escrituras. No sustituye pruebas de interacción en navegador.
 
 No se modificaron backend, database, docs ni AGENTS.md. No se realizó commit.

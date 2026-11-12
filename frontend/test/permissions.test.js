@@ -8,6 +8,8 @@ const expected = {
   AUDITOR: ['sucursales.read', 'medicamentos.read', 'inventario.read', 'caja.read', 'activos.read', 'planilla.read', 'auditoria.read'],
   DESPACHO: ['sucursales.read', 'medicamentos.read', 'entregas.read', 'entregas.changeState', 'disponibilidad.read'],
 }
+expected.ADMINISTRADOR.push('dashboard.read')
+expected.AUDITOR.push('dashboard.read')
 const operations = [...new Set(Object.values(expected).flat())]
 
 for (const [role, allowed] of Object.entries(expected)) {
