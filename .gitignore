@@ -1,34 +1,46 @@
-# Dependencias Node
+# Dependencias
 node_modules/
+**/node_modules/
 
-# Variables de entorno y secretos
+# Variables de entorno
 .env
-.env.local
-.env.development
-.env.production
+.env.*
+!.env.example
 
 # Builds
 dist/
 build/
-
-# Cobertura de pruebas
-coverage/
+**/dist/
+**/build/
 
 # Logs
 *.log
-logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
 
-# Archivos temporales
-*.tmp
-*.temp
-
-# VS Code
-.vscode/
-
-# Sistema operativo
+# Sistema / editor
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
 
-# Oracle / temporales
+# Oracle Wallet / secretos
+Wallet_*/
+wallet_*/
+*.p12
+*.sso
+*.pem
+*.jks
+tnsnames.ora
+sqlnet.ora
+ojdbc.properties
+
+# Dumps Oracle
 *.dmp
-*.log
+*.DMP
+*.par
+
+# Otros secretos
+*.key
+*.crt
