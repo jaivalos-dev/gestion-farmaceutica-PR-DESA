@@ -1,3 +1,4 @@
+import { validateLocation } from '../../data/guatemalaLocations.js'
 import { hasPermission, hasRole } from '../../auth/permissions.js'
 
 export const deliveryStates = ['CREADA', 'ASIGNADA', 'PREPARADA', 'EN_RUTA', 'ENTREGADA', 'CANCELADA']
@@ -38,6 +39,7 @@ export function deliveryPath(filters, user) {
     query.set('estado', filters.estado)
   }
   for (const field of ['departamento', 'municipio']) if (filters[field] !== undefined && filters[field] !== '') query.set(field, text(filters[field], field, 50))
+  validateLocation(filters, true)
   return `/api/entregas${query.size ? `?${query}` : ''}`
 }
 
@@ -46,6 +48,7 @@ export function deliveryPayload(values, user) {
   const payload = { id_venta: id(values.id_venta) }
   for (const [field, label, limit] of deliveryFields) payload[field] = text(values[field], label, limit)
   payload.observaciones = text(values.observaciones, 'Observaciones', 250, true)
+  validateLocation(payload)
   return payload
 }
 

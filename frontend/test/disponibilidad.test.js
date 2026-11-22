@@ -18,7 +18,7 @@ test('disponibilidad: roles permitidos sin restricción de sucursal', () => {
 
 test('consulta solo envía los cuatro parámetros aceptados y codifica destino', () => {
   assert.equal(availabilityPath({ ...form, id_sucursal: 99, gps: 'x' }, user), '/api/disponibilidad?id_medicamento=2&cantidad=3&departamento=Guatemala&municipio=Mixco')
-  assert.match(availabilityPath({ ...form, municipio: 'San José' }, user), /San\+Jos%C3%A9/)
+  assert.match(availabilityPath({ ...form, municipio: 'San José Pinula' }, user), /San\+Jos%C3%A9\+Pinula/)
 })
 
 test('valida IDs, cantidad positiva y ubicación obligatoria hasta 50 bytes', () => {

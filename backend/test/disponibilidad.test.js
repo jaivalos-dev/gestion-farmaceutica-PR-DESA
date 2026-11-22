@@ -4,6 +4,29 @@ const assert = require('node:assert/strict');
 const { randomBytes } = require('node:crypto');
 const pool = require('../src/database/pool');
 const tokens = require('../src/shared/tokens');
+const { locationEstimate } = require('../src/modules/disponibilidad/disponibilidad.service');
+
+test('comparación geográfica ignora diacríticos, mayúsculas y espacios sin mutar valores', () => {
+  const branch = Object.freeze({ departamento: ' Sacatepequez ', municipio: ' Antigua Guatemala ' });
+  const destination = Object.freeze({ departamento: 'SACATEPÉQUEZ', municipio: 'antigua guatemala' });
+  const local = { prioridad: 1, tiempo_estimado: 30, eta_disponible: true };
+  assert.deepEqual(locationEstimate(branch, destination), local);
+  assert.deepEqual(locationEstimate(destination, branch), local);
+  for (const municipio of ['José', 'JOSE', ' Jose\u0301 ']) {
+    assert.deepEqual(locationEstimate(
+      { departamento: 'GUATEMALA', municipio: 'San Jose Pinula' },
+      { departamento: ' Guatemala ', municipio: `San ${municipio.trim()} Pinula` },
+    ), local);
+  }
+  assert.deepEqual(locationEstimate(branch, { ...destination, municipio: 'Jocotenango' }), {
+    prioridad: 2, tiempo_estimado: 60, eta_disponible: true,
+  });
+  assert.deepEqual(locationEstimate(branch, { ...destination, departamento: 'Guatemala' }), {
+    prioridad: 3, tiempo_estimado: null, eta_disponible: false,
+  });
+  assert.deepEqual(branch, { departamento: ' Sacatepequez ', municipio: ' Antigua Guatemala ' });
+  assert.deepEqual(destination, { departamento: 'SACATEPÉQUEZ', municipio: 'antigua guatemala' });
+});
 
 const query = { id_medicamento: '1', cantidad: '2', departamento: 'Guatemala', municipio: 'Guatemala' };
 const candidates = [
@@ -31,7 +54,7 @@ async function setup(t, config = {}) {
         assert.match(sql, /i\.existencia\s*>=\s*:cantidad/);
         assert.match(sql, /i\.id_medicamento\s*=\s*:id_medicamento/);
         assert.deepEqual(binds, { id_medicamento: 1, cantidad: 2 });
-        return { rows: config.empty ? [] : structuredClone(candidates) };
+        return { rows: config.empty ? [] : structuredClone(config.candidates ?? candidates) };
       }
       throw new Error('SQL inesperado');
     },
@@ -80,6 +103,19 @@ test('CU-12 sin disponibilidad es 200 con lista vacía', async t => {
   assert.equal(result.status, 200);
   assert.equal(result.body.data.disponible, false);
   assert.deepEqual(result.body.data.candidatos, []);
+});
+
+test('CU-12 compara tildes sin cambiar la ubicación original en la respuesta', async t => {
+  const row = { ...candidates[0], departamento: 'Sacatepequez', municipio: 'Antigua Guatemala' };
+  const api = await setup(t, { candidates: [row] });
+  const result = await api.request({ ...query, departamento: ' SACATEPÉQUEZ ', municipio: ' antigua guatemala ' });
+  assert.equal(result.status, 200);
+  const [candidate] = result.body.data.candidatos;
+  assert.equal(candidate.prioridad, 1);
+  assert.equal(candidate.tiempo_estimado, 30);
+  assert.equal(candidate.eta_disponible, true);
+  assert.equal(candidate.departamento, row.departamento);
+  assert.equal(candidate.municipio, row.municipio);
 });
 
 for (const [config, status, code] of [

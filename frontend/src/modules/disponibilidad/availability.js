@@ -1,3 +1,4 @@
+import { validateLocation } from '../../data/guatemalaLocations.js'
 import { hasPermission } from '../../auth/permissions.js'
 
 export function availabilityPath(values, user) {
@@ -12,6 +13,7 @@ export function availabilityPath(values, user) {
     if (typeof value !== 'string' || !value.trim() || new TextEncoder().encode(value.trim()).length > 50) throw new Error(`${field} requiere texto de hasta 50 bytes UTF-8.`)
     query.set(field, value.trim())
   }
+  validateLocation(values)
   return `/api/disponibilidad?${query}`
 }
 

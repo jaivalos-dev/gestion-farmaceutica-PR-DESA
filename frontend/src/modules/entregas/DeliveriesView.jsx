@@ -1,7 +1,8 @@
+import LocationFields from '../../components/LocationFields'
 import { hasPermission, hasRole } from '../../auth/permissions'
 import { allowedDeliveryStates, deliveryFields, deliveryStates } from './deliveries'
 
-const columns = [['id_entrega', 'ID'], ['id_sucursal', 'Sucursal (ID)'], ['id_venta', 'Venta (ID)'], ['nombre_cliente', 'Cliente'], ['direccion', 'Dirección'], ['municipio', 'Municipio'], ['estado', 'Estado'], ['tiempo_estimado', 'ETA (min)'], ['fecha_entrega', 'Fecha de entrega']]
+const columns = [['id_entrega', 'ID'], ['id_sucursal', 'Sucursal (ID)'], ['id_venta', 'Venta (ID)'], ['nombre_cliente', 'Cliente'], ['direccion', 'Dirección'], ['municipio', 'Municipio'], ['estado', 'Estado'], ['tiempo_estimado', 'Tiempo estimado de entrega (min)'], ['fecha_entrega', 'Fecha de entrega']]
 const detailFields = [...columns, ['telefono', 'Teléfono'], ['departamento', 'Departamento'], ['fecha_solicitud', 'Fecha de solicitud'], ['observaciones', 'Observaciones']]
 
 function value(row, field) {
@@ -25,13 +26,14 @@ export default function DeliveriesView({ user, result, draft, setDraft, form, se
     <form className="mb-4" onSubmit={onConsult}><fieldset disabled={disabled}><legend className="h6">Filtros</legend><div className="row g-3">
       {['id_sucursal', 'id_venta'].map((field, i) => <div className="col-md-4" key={field}><label className="form-label" htmlFor={`delivery-filter-${field}`}>{i === 0 ? 'Sucursal (ID)' : 'Venta (ID)'}</label><input className="form-control" id={`delivery-filter-${field}`} type="number" min="1" max="9999999999" step="1" readOnly={field === 'id_sucursal' && hasRole(user, ['ENCARGADO'])} value={draft[field]} onChange={event => setDraft({ ...draft, [field]: event.target.value })} /></div>)}
       <div className="col-md-4"><label className="form-label" htmlFor="delivery-filter-state">Estado</label><select className="form-select" id="delivery-filter-state" value={draft.estado} onChange={event => setDraft({ ...draft, estado: event.target.value })}><option value="">Todos</option>{deliveryStates.map(state => <option key={state}>{state}</option>)}</select></div>
-      {['departamento', 'municipio'].map(field => <div className="col-md-6" key={field}><label className="form-label" htmlFor={`delivery-filter-${field}`}>{field === 'departamento' ? 'Departamento' : 'Municipio'}</label><input className="form-control" id={`delivery-filter-${field}`} maxLength={50} value={draft[field]} onChange={event => setDraft({ ...draft, [field]: event.target.value })} /></div>)}
+      <LocationFields values={draft} onChange={setDraft} prefix="delivery-filter" required={false} />
     </div><button className="btn btn-outline-primary mt-3" type="submit">Consultar</button></fieldset></form>
     {hasPermission(user, 'entregas.create') && form && <form className="card card-body mb-4" aria-label="Nueva entrega" aria-busy={busy} onSubmit={onSave}>
       <h2 className="h5">Nueva entrega</h2><p>Ingrese una venta CONFIRMADA de su sucursal, sin entrega previa. Crear o cancelar una entrega no modifica el inventario ni anula la venta.</p>
       <fieldset disabled={busy}><div className="row g-3">
         <div className="col-md-6"><label className="form-label" htmlFor="delivery-sale">Venta (ID)</label><input id="delivery-sale" className="form-control" type="number" min="1" max="9999999999" step="1" required value={form.id_venta} onChange={event => setForm({ ...form, id_venta: event.target.value })} /></div>
-        {deliveryFields.map(([field, label, limit]) => <div className="col-md-6" key={field}><label className="form-label" htmlFor={`delivery-${field}`}>{label}</label><input id={`delivery-${field}`} className="form-control" type={field === 'telefono' ? 'tel' : 'text'} required maxLength={limit} value={form[field]} onChange={event => setForm({ ...form, [field]: event.target.value })} /></div>)}
+        {deliveryFields.filter(([field]) => !['departamento', 'municipio'].includes(field)).map(([field, label, limit]) => <div className="col-md-6" key={field}><label className="form-label" htmlFor={`delivery-${field}`}>{label}</label><input id={`delivery-${field}`} className="form-control" type={field === 'telefono' ? 'tel' : 'text'} required maxLength={limit} value={form[field]} onChange={event => setForm({ ...form, [field]: event.target.value })} /></div>)}
+        <LocationFields values={form} onChange={setForm} prefix="delivery" />
         <div className="col-12"><label className="form-label" htmlFor="delivery-notes">Observaciones (opcional)</label><textarea id="delivery-notes" className="form-control" maxLength={250} value={form.observaciones} onChange={event => setForm({ ...form, observaciones: event.target.value })} /></div>
       </div><div className="d-flex gap-2 mt-3"><button className="btn btn-primary" type="submit">Guardar entrega</button><button className="btn btn-outline-secondary" type="button" onClick={onCancel}>Cancelar formulario</button></div></fieldset>
     </form>}

@@ -18,9 +18,9 @@ function validateLocation(value) {
 }
 
 // Regla técnica del MVP: coincidencia textual, sin distancia ni tráfico real.
-// NFC hace equivalentes las representaciones Unicode del mismo texto; conserva tildes.
+// Normalizar solo para comparar; los valores originales se conservan.
 function locationEstimate(branch, destination) {
-  const normalize = value => value.trim().normalize('NFC').toUpperCase();
+  const normalize = value => value.trim().normalize('NFD').replace(/\p{M}/gu, '').toUpperCase();
   const sameDepartment = normalize(branch.departamento) === normalize(destination.departamento);
   const sameMunicipality = normalize(branch.municipio) === normalize(destination.municipio);
   const prioridad = sameDepartment ? (sameMunicipality ? 1 : 2) : 3;

@@ -1,3 +1,4 @@
+import LocationFields from './LocationFields'
 import { useRef, useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import { hasPermission } from '../auth/permissions'
@@ -64,19 +65,7 @@ export default function CatalogManager({ title, endpoint, columns, idField, writ
       {error && <p className="alert alert-danger" role="alert">{error.message}{error.code && ` (${error.code})`}</p>}
       <fieldset disabled={pending}>
         <div className="row g-3">
-          {fields.map(field => {
-            const id = `${idField}-${field.name}`
-            const props = {
-              id, name: field.name, required: true, value: editor.values[field.name],
-              onChange: event => setEditor(current => ({ ...current, values: { ...current.values, [field.name]: event.target.value } })),
-            }
-            return <div className="col-12 col-md-6" key={field.name}>
-              <label className="form-label" htmlFor={id}>{field.label}</label>
-              {field.options
-                ? <select {...props} className="form-select">{field.options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-                : <input {...props} className="form-control" type={field.type ?? 'text'} maxLength={field.maxBytes} min={field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? 'any' : undefined} />}
-            </div>
-          })}
+          <CatalogFields fields={fields} values={editor.values} idField={idField} onChange={values => setEditor(current => ({ ...current, values }))} />
         </div>
         <div className="d-flex gap-2 mt-3">
           <button className="btn btn-primary" type="submit">{pending ? 'Guardando…' : 'Guardar'}</button>
@@ -87,4 +76,23 @@ export default function CatalogManager({ title, endpoint, columns, idField, writ
     <CatalogTable key={revision} endpoint={endpoint} title={title} columns={columns} idField={idField}
       onEdit={canWrite ? openEditor : undefined} actionsDisabled={pending || editor !== null} />
   </>
+}
+
+export function CatalogFields({ fields, values, idField, onChange }) {
+  return fields.map(field => {
+    if (field.location) return field.name === 'departamento'
+      ? <LocationFields key={field.name} values={values} prefix={idField} onChange={onChange} />
+      : null
+    const id = `${idField}-${field.name}`
+    const props = {
+      id, name: field.name, required: true, value: values[field.name],
+      onChange: event => onChange({ ...values, [field.name]: event.target.value }),
+    }
+    return <div className="col-12 col-md-6" key={field.name}>
+      <label className="form-label" htmlFor={id}>{field.label}</label>
+      {field.options
+        ? <select {...props} className="form-select">{field.options.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+        : <input {...props} className="form-control" type={field.type ?? 'text'} maxLength={field.maxBytes} min={field.type === 'number' ? 0 : undefined} step={field.type === 'number' ? 'any' : undefined} />}
+    </div>
+  })
 }

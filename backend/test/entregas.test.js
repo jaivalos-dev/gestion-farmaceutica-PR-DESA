@@ -60,7 +60,7 @@ async function setup(t, config = {}) {
         if (config.fail?.test(sql)) throw new Error('ORA-99999 SQL privado');
         if (/INSERT INTO AUDITORIA\b/.test(sql)) { pendingAudit.push({ ...binds }); return { rowsAffected: 1 }; }
         if (/FROM VENTA/.test(sql)) return { rows: config.missingSale ? [] : [{ id_venta: binds.id, id_sucursal: config.saleBranch ?? 1, estado: config.saleState ?? 'CONFIRMADA' }] };
-        if (/FROM SUCURSAL/.test(sql)) return { rows: config.missingBranch ? [] : [{ id_sucursal: binds.id, activa: config.inactiveBranch ? 'N' : 'S', departamento: 'Guatemala', municipio: 'Guatemala' }] };
+        if (/FROM SUCURSAL/.test(sql)) return { rows: config.missingBranch ? [] : [{ id_sucursal: binds.id, activa: config.inactiveBranch ? 'N' : 'S', departamento: 'Guatemala', municipio: 'Guatemala', ...config.branchLocation }] };
         if (/INSERT INTO ENTREGA/.test(sql)) {
           if (config.unique) throw Object.assign(new Error('ORA-00001 FARMACIA.UQ_ENTREGA_VENTA'), { errorNum: 1 });
           const { id, ...data } = binds;
@@ -126,6 +126,20 @@ test('CU-11 crea desde venta confirmada, deriva sucursal, ETA, fechas y confirma
   assert.match(insert.sql, /NULL/);
   assert.equal(insert.options.autoCommit, false);
   assert.ok(api.calls.every(call => !/INVENTARIO|MOVIMIENTO_CAJA|UPDATE VENTA/.test(call.sql)));
+});
+
+test('CU-11 compara diacríticos para ETA sin normalizar los valores que guarda o devuelve', async t => {
+  const api = await setup(t, { branchLocation: { departamento: 'Guatemala', municipio: 'San Jose Pinula' } });
+  const location = { departamento: 'GUATEMALA', municipio: 'San José Pinula' };
+  const result = await api.request('POST', '', { ...input, ...location });
+  assert.equal(result.status, 201);
+  assert.equal(result.body.data.tiempo_estimado, 30);
+  const insert = api.calls.find(call => /INSERT INTO ENTREGA/.test(call.sql));
+  for (const field of ['departamento', 'municipio']) {
+    assert.equal(insert.binds[field], location[field]);
+    assert.equal(result.body.data[field], location[field]);
+    assert.equal(api.rows()[0][field], location[field]);
+  }
 });
 
 for (const [location, eta] of [[{ municipio: 'Mixco' }, 60], [{ departamento: 'Otro' }, null]]) test(`CU-11 calcula ETA ${eta} sin stock disponible`, async t => {

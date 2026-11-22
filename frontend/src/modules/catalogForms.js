@@ -1,8 +1,10 @@
+import { validateLocation } from '../data/guatemalaLocations.js'
+
 export const branchFields = [
   { name: 'nombre', label: 'Nombre', maxBytes: 100 },
   { name: 'tipo_sucursal', label: 'Tipo de sucursal', options: [['FARMACIA', 'Farmacia'], ['STAND', 'Stand']] },
-  { name: 'departamento', label: 'Departamento', maxBytes: 50 },
-  { name: 'municipio', label: 'Municipio', maxBytes: 50 },
+  { name: 'departamento', location: true, label: 'Departamento', maxBytes: 50 },
+  { name: 'municipio', location: true, label: 'Municipio', maxBytes: 50 },
   { name: 'direccion', label: 'Dirección', maxBytes: 200 },
   { name: 'activa', label: 'Estado', options: [['S', 'Activa'], ['N', 'Inactiva']] },
 ]
@@ -34,7 +36,9 @@ function textPayload(values, fields) {
 }
 
 export function toBranchPayload(values) {
-  return textPayload(values, branchFields)
+  const payload = textPayload(values, branchFields)
+  validateLocation(payload)
+  return payload
 }
 
 export function toMedicinePayload(values) {
