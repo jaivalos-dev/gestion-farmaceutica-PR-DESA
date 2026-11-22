@@ -1,5 +1,7 @@
 const express = require('express');
 const cors = require('cors');
+const swaggerUi = require('swagger-ui-express');
+const openapi = require('./docs/openapi');
 const healthRoutes = require('./modules/health/health.routes');
 const authRoutes = require('./modules/auth/auth.routes');
 const sucursalesRoutes = require('./modules/sucursales/sucursales.routes');
@@ -23,6 +25,7 @@ function createApp() {
   // Sin frontend todavía: no habilitar orígenes externos por defecto.
   app.use(cors({ origin: false }));
   app.use(express.json({ limit: '100kb' }));
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openapi));
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/sucursales', sucursalesRoutes);
